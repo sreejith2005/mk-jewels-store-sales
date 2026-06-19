@@ -1,0 +1,8 @@
+google-genai
+python-dotenv
+sounddevice
+numpy
+scipy
+openai
+flask
+aiohttp
