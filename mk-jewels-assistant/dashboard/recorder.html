@@ -165,12 +165,10 @@
 
   <script>
     const TARGET_SAMPLE_RATE = 16000;
-    const WS_HOST = window.location.hostname;
-    const WS_PORT = 8765;
 
     const params = new URLSearchParams(window.location.search);
     const salespersonName = (params.get("name") || "Unknown").trim() || "Unknown";
-    const websocketUrl = `ws://${WS_HOST}:${WS_PORT}?name=${encodeURIComponent(salespersonName)}`;
+    const websocketUrl = `ws://${window.location.hostname}:8765?name=${encodeURIComponent(salespersonName)}`;
 
     const salespersonNameElement = document.getElementById("salespersonName");
     const startButton = document.getElementById("startButton");
@@ -226,7 +224,7 @@
         });
 
         websocket.addEventListener("error", () => {
-          message.textContent = "WebSocket error. Check the laptop IP and recorder backend.";
+          message.textContent = "WebSocket error. Check the recorder backend.";
           setConnectionStatus(false);
           if (!isRecording) {
             cleanup();
