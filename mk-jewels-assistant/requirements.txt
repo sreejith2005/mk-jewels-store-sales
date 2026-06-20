@@ -5,4 +5,7 @@ numpy
 scipy
 openai
 flask
+flask-cors
 aiohttp
+requests
+websockets>=16.0

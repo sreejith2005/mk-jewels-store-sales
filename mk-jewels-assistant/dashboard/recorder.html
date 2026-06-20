@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MK Jewels Recorder</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f6f7fb;
+      color: #172033;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    main {
+      width: min(720px, 100%);
+      background: #ffffff;
+      border: 1px solid #d9deea;
+      border-radius: 8px;
+      padding: 32px;
+      box-shadow: 0 12px 40px rgba(23, 32, 51, 0.08);
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(32px, 6vw, 54px);
+      line-height: 1.05;
+    }
+
+    .label {
+      margin: 0;
+      color: #526070;
+      font-size: 18px;
+    }
+
+    .salesperson {
+      margin: 18px 0 28px;
+      font-size: clamp(28px, 5vw, 44px);
+      font-weight: 700;
+      color: #0f5132;
+      overflow-wrap: anywhere;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 28px 0;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 20px;
+      font-weight: 700;
+      padding: 18px 28px;
+      min-width: 190px;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    #startButton {
+      background: #0b5ed7;
+      color: #ffffff;
+      font-size: 26px;
+      padding: 24px 34px;
+      min-width: 280px;
+    }
+
+    #stopButton {
+      background: #bb2d3b;
+      color: #ffffff;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border: 1px solid #e2e7f0;
+      border-radius: 8px;
+      background: #fafbfe;
+      text-align: left;
+    }
+
+    .status-row strong {
+      color: #303b4d;
+    }
+
+    .connected {
+      color: #0f5132;
+      font-weight: 700;
+    }
+
+    .disconnected {
+      color: #842029;
+      font-weight: 700;
+    }
+
+    .recording {
+      color: #bb2d3b;
+      font-weight: 700;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #message {
+      min-height: 24px;
+      margin-top: 18px;
+      color: #526070;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="label">Salesperson</p>
+    <div id="salespersonName" class="salesperson">Unknown</div>
+
+    <h1>Audio Recorder</h1>
+
+    <div class="controls">
+      <button id="startButton" type="button">Start Recording</button>
+      <button id="stopButton" type="button" class="hidden">Stop</button>
+    </div>
+
+    <div class="status-grid" aria-live="polite">
+      <div class="status-row">
+        <strong>Connection</strong>
+        <span id="connectionStatus" class="disconnected">Disconnected</span>
+      </div>
+      <div class="status-row">
+        <strong>Recording</strong>
+        <span id="recordingStatus">Stopped</span>
+      </div>
+    </div>
+
+    <div id="message"></div>
+  </main>
+
+  <script>
+    const TARGET_SAMPLE_RATE = 16000;
+    const WS_HOST = window.location.hostname;
+    const WS_PORT = 8765;
+
+    const params = new URLSearchParams(window.location.search);
+    const salespersonName = (params.get("name") || "Unknown").trim() || "Unknown";
+    const websocketUrl = `ws://${WS_HOST}:${WS_PORT}?name=${encodeURIComponent(salespersonName)}`;
+
+    const salespersonNameElement = document.getElementById("salespersonName");
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const connectionStatus = document.getElementById("connectionStatus");
+    const recordingStatus = document.getElementById("recordingStatus");
+    const message = document.getElementById("message");
+
+    let audioContext = null;
+    let mediaStream = null;
+    let sourceNode = null;
+    let processorNode = null;
+    let websocket = null;
+    let recordingStartedAt = 0;
+    let counterTimer = null;
+    let isRecording = false;
+
+    salespersonNameElement.textContent = salespersonName;
+
+    startButton.addEventListener("click", startRecording);
+    stopButton.addEventListener("click", stopRecording);
+    window.addEventListener("beforeunload", stopRecording);
+
+    async function startRecording() {
+      startButton.disabled = true;
+      message.textContent = "Requesting microphone permission...";
+
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+        websocket = new WebSocket(websocketUrl);
+        websocket.binaryType = "arraybuffer";
+
+        websocket.addEventListener("open", () => {
+          setConnectionStatus(true);
+          startAudioPipeline();
+        });
+
+        websocket.addEventListener("close", () => {
+          setConnectionStatus(false);
+          if (isRecording) {
+            stopRecording("WebSocket disconnected.");
+          } else {
+            cleanup();
+          }
+        });
+
+        websocket.addEventListener("error", () => {
+          message.textContent = "WebSocket error. Check the laptop IP and recorder backend.";
+          setConnectionStatus(false);
+          if (!isRecording) {
+            cleanup();
+          }
+        });
+      } catch (error) {
+        message.textContent = `Unable to start recording: ${error.message}`;
+        cleanup();
+      }
+    }
+
+    function startAudioPipeline() {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: TARGET_SAMPLE_RATE
+      });
+
+      sourceNode = audioContext.createMediaStreamSource(mediaStream);
+      processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+      processorNode.onaudioprocess = (event) => {
+        if (!isRecording || !websocket || websocket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        const input = event.inputBuffer.getChannelData(0);
+        const pcm = floatToInt16Pcm(input, audioContext.sampleRate, TARGET_SAMPLE_RATE);
+        websocket.send(pcm.buffer);
+      };
+
+      sourceNode.connect(processorNode);
+      processorNode.connect(audioContext.destination);
+
+      isRecording = true;
+      recordingStartedAt = Date.now();
+      startButton.classList.add("hidden");
+      stopButton.classList.remove("hidden");
+      startButton.disabled = false;
+      message.textContent = "";
+      updateRecordingCounter();
+      counterTimer = window.setInterval(updateRecordingCounter, 1000);
+    }
+
+    function stopRecording(reason) {
+      if (reason) {
+        message.textContent = reason;
+      }
+      cleanup();
+    }
+
+    function cleanup() {
+      isRecording = false;
+
+      if (counterTimer) {
+        window.clearInterval(counterTimer);
+        counterTimer = null;
+      }
+
+      if (processorNode) {
+        processorNode.disconnect();
+        processorNode.onaudioprocess = null;
+        processorNode = null;
+      }
+
+      if (sourceNode) {
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+
+      if (audioContext && audioContext.state !== "closed") {
+        audioContext.close();
+      }
+      audioContext = null;
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        mediaStream = null;
+      }
+
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.close();
+      }
+      websocket = null;
+
+      startButton.disabled = false;
+      startButton.classList.remove("hidden");
+      stopButton.classList.add("hidden");
+      recordingStatus.textContent = "Stopped";
+      recordingStatus.className = "";
+      setConnectionStatus(false);
+    }
+
+    function updateRecordingCounter() {
+      const elapsedSeconds = Math.floor((Date.now() - recordingStartedAt) / 1000);
+      recordingStatus.textContent = `Recording... ${elapsedSeconds} seconds`;
+      recordingStatus.className = "recording";
+    }
+
+    function setConnectionStatus(connected) {
+      connectionStatus.textContent = connected ? "Connected" : "Disconnected";
+      connectionStatus.className = connected ? "connected" : "disconnected";
+    }
+
+    function floatToInt16Pcm(float32Samples, inputSampleRate, outputSampleRate) {
+      const samples = inputSampleRate === outputSampleRate
+        ? float32Samples
+        : downsampleBuffer(float32Samples, inputSampleRate, outputSampleRate);
+      const pcm = new Int16Array(samples.length);
+
+      for (let index = 0; index < samples.length; index += 1) {
+        const sample = Math.max(-1, Math.min(1, samples[index]));
+        pcm[index] = sample < 0 ? sample * 32768 : sample * 32767;
+      }
+
+      return pcm;
+    }
+
+    function downsampleBuffer(buffer, inputSampleRate, outputSampleRate) {
+      if (outputSampleRate >= inputSampleRate) {
+        return buffer;
+      }
+
+      const ratio = inputSampleRate / outputSampleRate;
+      const newLength = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accumulator = 0;
+        let count = 0;
+
+        for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+          accumulator += buffer[index];
+          count += 1;
+        }
+
+        result[offsetResult] = count > 0 ? accumulator / count : 0;
+        offsetResult += 1;
+        offsetBuffer = nextOffsetBuffer;
+      }
+
+      return result;
+    }
+  </script>
+</body>
+</html>

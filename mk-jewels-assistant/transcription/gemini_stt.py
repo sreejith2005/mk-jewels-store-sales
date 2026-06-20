@@ -18,10 +18,99 @@ class GeminiAPIError(Exception):
     """Custom exception for Gemini API errors."""
     pass
 
-def transcribe_and_triage(audio_bytes: bytes, sample_rate: int, salesperson_name: str) -> dict:
+
+def parse_json_response(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
+
+
+def _gemini_config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        response_mime_type="application/json",
+        temperature=0,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
+
+
+SYSTEM_PROMPT = (
+    "You are an AI assistant monitoring sales conversations at a jewelry store in India. "
+    "The salesperson may speak in English, Hindi, Marathi, or a mix of all three. "
+    "Your job is to transcribe the conversation accurately and then analyze it for signals "
+    "that a sales manager should know about. Jewelry-specific terms you will encounter include: "
+    "hallmark, BIS, HUID, carat, VVS, solitaire, kundan, polki, making charges, exchange scheme, "
+    "IGI, GIA, solitaire, rhodium. Preserve these terms exactly as spoken."
+)
+
+USER_PROMPT = (
+    "Transcribe this audio exactly as spoken, preserving all languages. "
+    "Then output ONLY a valid JSON object with these fields and no other text: "
+    "transcript (string), objection_detected (bool), price_concern (bool), "
+    "certification_question (bool), upsell_miss (bool), knowledge_gap (bool), "
+    "intent_signal (bool), alert_priority (string, one of: none / low / medium / high), "
+    "reasoning (string, max 20 words explaining the highest-priority signal detected or 'no signals detected')."
+)
+
+
+def _triage_openrouter(transcript_text: str, salesperson_name: str) -> dict:
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key=Config.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    prompt = (
+        f"Salesperson: {salesperson_name}\n"
+        f"Transcript:\n{transcript_text}\n\n"
+        "Classify this jewelry sales conversation. Output ONLY a valid JSON object "
+        "with these fields and no other text: objection_detected (bool), "
+        "price_concern (bool), certification_question (bool), upsell_miss (bool), "
+        "knowledge_gap (bool), intent_signal (bool), alert_priority (string, one of: "
+        "none / low / medium / high), reasoning (string, max 20 words explaining the "
+        "highest-priority signal detected or 'no signals detected')."
+    )
+
+    response = client.chat.completions.create(
+        model="meta-llama/llama-3.3-70b-instruct:free",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    result = parse_json_response(response.choices[0].message.content)
+    result["transcript"] = transcript_text
+    return result
+
+
+def _fallback_or_raise(
+    error: GeminiAPIError,
+    transcript_text: str,
+    salesperson_name: str,
+    openrouter_fallback: bool,
+) -> dict:
+    if openrouter_fallback:
+        try:
+            return _triage_openrouter(transcript_text, salesperson_name)
+        except Exception:
+            pass
+    raise error
+
+
+def transcribe_and_triage(
+    audio_bytes: bytes,
+    sample_rate: int,
+    salesperson_name: str,
+    openrouter_fallback: bool = True,
+) -> dict:
     """
     Transcribes audio and triages sales conversation using Gemini.
     """
+    transcript_text = ""
+
     try:
         # Convert raw PCM audio bytes to WAV buffer in memory
         # Assuming 16-bit PCM which is standard for such audio captures
@@ -30,57 +119,39 @@ def transcribe_and_triage(audio_bytes: bytes, sample_rate: int, salesperson_name
         wavfile.write(wav_buffer, sample_rate, audio_data)
         wav_bytes = wav_buffer.getvalue()
     except Exception as e:
-        raise GeminiAPIError(f"Failed to convert audio to WAV: {e}")
+        error = GeminiAPIError(f"Failed to convert audio to WAV: {e}")
+        return _fallback_or_raise(
+            error, transcript_text, salesperson_name, openrouter_fallback
+        )
 
     try:
         client = genai.Client(api_key=Config.GEMINI_API_KEY)
     except Exception as e:
-        raise GeminiAPIError(f"Failed to initialize Gemini Client: {e}")
-
-    system_prompt = (
-        "You are an AI assistant monitoring sales conversations at a jewelry store in India. "
-        "The salesperson may speak in English, Hindi, Marathi, or a mix of all three. "
-        "Your job is to transcribe the conversation accurately and then analyze it for signals "
-        "that a sales manager should know about. Jewelry-specific terms you will encounter include: "
-        "hallmark, BIS, HUID, carat, VVS, solitaire, kundan, polki, making charges, exchange scheme, "
-        "IGI, GIA, solitaire, rhodium. Preserve these terms exactly as spoken."
-    )
-
-    user_prompt = (
-        "Transcribe this audio exactly as spoken, preserving all languages. "
-        "Then output ONLY a valid JSON object with these fields and no other text: "
-        "transcript (string), objection_detected (bool), price_concern (bool), "
-        "certification_question (bool), upsell_miss (bool), knowledge_gap (bool), "
-        "intent_signal (bool), alert_priority (string, one of: none / low / medium / high), "
-        "reasoning (string, max 20 words explaining the highest-priority signal detected or 'no signals detected')."
-    )
-
-    def parse_json_response(text: str) -> dict:
-        text = text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.endswith("```"):
-            text = text[:-3]
-        return json.loads(text.strip())
+        error = GeminiAPIError(f"Failed to initialize Gemini Client: {e}")
+        return _fallback_or_raise(
+            error, transcript_text, salesperson_name, openrouter_fallback
+        )
 
     try:
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
                 types.Part.from_bytes(data=wav_bytes, mime_type='audio/wav'),
-                user_prompt
+                USER_PROMPT
             ],
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json"
-            )
+            config=_gemini_config(),
         )
         response_text = response.text
     except Exception as e:
-        raise GeminiAPIError(f"Gemini API request failed: {e}")
+        error = GeminiAPIError(f"Gemini API request failed: {e}")
+        return _fallback_or_raise(
+            error, transcript_text, salesperson_name, openrouter_fallback
+        )
 
     try:
-        return parse_json_response(response_text)
+        result = parse_json_response(response_text)
+        transcript_text = result.get("transcript", "")
+        return result
     except json.JSONDecodeError:
         # Retry once with a prompt asking Gemini to return only the JSON object again
         retry_prompt = "Please return ONLY the valid JSON object requested previously, and no other text."
@@ -89,13 +160,47 @@ def transcribe_and_triage(audio_bytes: bytes, sample_rate: int, salesperson_name
                 model='gemini-2.5-flash',
                 contents=[
                     types.Part.from_bytes(data=wav_bytes, mime_type='audio/wav'),
-                    user_prompt + "\n\n" + retry_prompt
+                    USER_PROMPT + "\n\n" + retry_prompt
                 ],
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    response_mime_type="application/json"
-                )
+                config=_gemini_config(),
             )
-            return parse_json_response(retry_response.text)
+            result = parse_json_response(retry_response.text)
+            transcript_text = result.get("transcript", "")
+            return result
         except Exception as e:
-            raise GeminiAPIError(f"Gemini API retry request or JSON parsing failed: {e}")
+            error = GeminiAPIError(f"Gemini API retry request or JSON parsing failed: {e}")
+            return _fallback_or_raise(
+                error, transcript_text, salesperson_name, openrouter_fallback
+            )
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python gemini_stt.py <audio_file.wav>")
+        sys.exit(1)
+
+    audio_file_path = sys.argv[1]
+    if not os.path.exists(audio_file_path):
+        print(f"Error: Could not find audio file '{audio_file_path}'")
+        sys.exit(1)
+
+    print(f"Testing transcribe_and_triage with {audio_file_path}...")
+    try:
+        # Read WAV file directly for testing, though in production it might be raw PCM
+        # Since transcribe_and_triage expects raw PCM bytes, we extract them from the WAV file
+        sample_rate, data = wavfile.read(audio_file_path)
+        # Convert back to raw bytes for testing the function
+        raw_audio_bytes = data.tobytes()
+        
+        result = transcribe_and_triage(
+            audio_bytes=raw_audio_bytes,
+            sample_rate=sample_rate,
+            salesperson_name="Test Salesperson"
+        )
+        print("\n--- Result ---")
+        # Ensure stdout handles UTF-8 to prevent charmap errors on Windows
+        import sys
+        if sys.stdout.encoding.lower() != 'utf-8':
+            sys.stdout.reconfigure(encoding='utf-8')
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print(f"\nError: {e}")

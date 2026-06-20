@@ -1,2 +1,7 @@
 google-genai
 python-dotenv
+numpy
+requests
+flask
+flask-cors
+websockets>=16.0
