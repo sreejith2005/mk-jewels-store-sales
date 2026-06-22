@@ -9,3 +9,5 @@ flask-cors
 aiohttp
 requests
 websockets>=16.0
+gunicorn
+pytest

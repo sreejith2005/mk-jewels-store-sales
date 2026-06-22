@@ -1,15 +1,10 @@
 import requests
-import sys
 
 from config import Config
+from core.logger import get_logger
 
 
-def _safe_print(message: str):
-    try:
-        print(message)
-    except UnicodeEncodeError:
-        encoding = sys.stdout.encoding or "utf-8"
-        print(message.encode(encoding, errors="replace").decode(encoding))
+logger = get_logger(__name__)
 
 
 class AlertManager:
@@ -21,7 +16,7 @@ class AlertManager:
 
     def send_alert(self, salesperson_name: str, event: dict):
         message = self._format_message(salesperson_name, event)
-        _safe_print(message)
+        logger.info(message)
 
         if not self.should_alert(event):
             return
@@ -29,7 +24,7 @@ class AlertManager:
         token = self.config.DISCORD_BOT_TOKEN
         channel_id = self.config.DISCORD_CHANNEL_ID
         if not token or not channel_id:
-            _safe_print("Warning: Discord alert skipped because bot token or channel ID is missing.")
+            logger.warning("Discord alert skipped because bot token or channel ID is missing.")
             return
 
         url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
@@ -47,7 +42,7 @@ class AlertManager:
             )
             response.raise_for_status()
         except requests.RequestException as error:
-            _safe_print(f"Warning: Discord alert failed: {error}")
+            logger.error("Discord alert failed: %s", error)
 
     def _format_message(self, salesperson_name: str, event: dict) -> str:
         priority = event.get("alert_priority", "none")

@@ -50,7 +50,10 @@ type SessionEvent = {
   transcript?: string;
   alert_priority?: string;
   reasoning?: string;
+  manager_feedback?: FeedbackValue | null;
 };
+
+type FeedbackValue = "useful" | "false_alarm" | "noted";
 
 type Stats = {
   total_events: number;
@@ -84,6 +87,12 @@ const statCards: Array<{
   { key: "certification_questions", label: "Cert Questions", icon: ShieldQuestion },
   { key: "upsell_misses", label: "Upsell Misses", icon: Sparkles },
   { key: "high_intent_signals", label: "High Intent", icon: TrendingUp },
+];
+
+const feedbackOptions: Array<{ value: FeedbackValue; label: string }> = [
+  { value: "useful", label: "👍 Useful" },
+  { value: "false_alarm", label: "👎 False Alarm" },
+  { value: "noted", label: "📝 Noted" },
 ];
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -148,6 +157,7 @@ export default function Page() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [savedFeedbackIds, setSavedFeedbackIds] = useState<Set<number>>(() => new Set());
   const [stats, setStats] = useState<Stats>(emptyStats);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,6 +218,28 @@ export default function Page() {
       window.clearInterval(interval);
     };
   }, [loadDashboard]);
+
+  const saveFeedback = useCallback(async (eventId: number, feedback: FeedbackValue) => {
+    const response = await fetch(`${API_BASE}/api/feedback/${eventId}`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ feedback }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+
+    setSavedFeedbackIds((previous) => new Set(previous).add(eventId));
+    setEvents((previous) =>
+      previous.map((event) =>
+        event.id === eventId ? { ...event, manager_feedback: feedback } : event,
+      ),
+    );
+  }, []);
 
   const chartData = useMemo(
     () => [
@@ -420,6 +452,24 @@ export default function Page() {
                     <p className="mt-3 border-l-2 border-[#B8860B]/70 pl-3 text-sm text-zinc-400">
                       {event.reasoning || "No reasoning provided."}
                     </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {event.id && (event.manager_feedback || savedFeedbackIds.has(event.id)) ? (
+                        <span className="text-xs font-medium text-emerald-400">
+                          Feedback saved
+                        </span>
+                      ) : event.id ? (
+                        feedbackOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => void saveFeedback(event.id as number, option.value)}
+                            className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300 transition hover:border-emerald-500/50 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+                          >
+                            {option.label}
+                          </button>
+                        ))
+                      ) : null}
+                    </div>
                   </article>
                 ))
               )}

@@ -14,9 +14,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alerting.console_alert import AlertManager
 from config import Config
-from pipeline.session import Session
+from pipeline.session import TRIAGE_FN, Session
 from storage.db import Database
-from transcription.gemini_stt import GeminiAPIError, transcribe_and_triage
+from transcription.gemini_stt import GeminiAPIError
 
 
 class _DirectAudioSession(Session):
@@ -61,7 +61,7 @@ class _DirectAudioSession(Session):
 
         self._collect_completed(self._pending)
         future = self._executor.submit(
-            transcribe_and_triage,
+            TRIAGE_FN,
             audio_bytes=audio_bytes,
             sample_rate=Config.SAMPLE_RATE,
             salesperson_name=self.salesperson_name,

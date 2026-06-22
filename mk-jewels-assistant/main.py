@@ -1,11 +1,15 @@
 import asyncio
 import socket
-import sys
+import subprocess
 import time
+from pathlib import Path
 
 from capture.mic_capture import MicCapture
 from config import Config
 from pipeline.session import FileSession, Session
+
+
+APP_DIR = Path(__file__).parent
 
 
 def main():
@@ -14,17 +18,25 @@ def main():
     ).strip()
 
     if run_mode == "3":
-        from dashboard.server import app
+        if Config.PIPELINE_MODE == "demo":
+            from dashboard.server import app
 
-        app.run(port=5000)
+            print("Starting dashboard server in demo mode using Flask's built-in server.")
+            app.run(port=5000, debug=False)
+        else:
+            print("Starting dashboard server in production mode using Gunicorn.")
+            subprocess.Popen(
+                [
+                    "gunicorn",
+                    "-c",
+                    "dashboard/gunicorn_config.py",
+                    "dashboard.server:app",
+                ],
+                cwd=APP_DIR,
+            )
         return
 
-    if not Config.GEMINI_API_KEY:
-        print(
-            "Error: GEMINI_API_KEY is not set. Add it to your environment or .env file.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    Config.validate()
 
     if run_mode == "5":
         asyncio.run(start_live_phone_capture())
@@ -38,10 +50,14 @@ def main():
 
     if run_mode == "2":
         wav_file_path = input("Enter WAV file path: ").strip().strip('"')
+        simulate_realtime_input = input(
+            "Simulate real-time delays? (y/n, default n):"
+        ).strip().lower()
         salesperson_name = input("Enter salesperson name: ").strip()
         session = FileSession(
             wav_file_path=wav_file_path,
             salesperson_name=salesperson_name,
+            simulate_realtime=simulate_realtime_input == "y",
         )
     else:
         print("Available microphones:")

@@ -47,10 +47,17 @@ class Database:
                     knowledge_gap INTEGER,
                     intent_signal INTEGER,
                     alert_priority TEXT,
-                    reasoning TEXT
+                    reasoning TEXT,
+                    manager_feedback TEXT DEFAULT NULL
                 )
                 """
             )
+            try:
+                self._connection.execute(
+                    "ALTER TABLE events ADD COLUMN manager_feedback TEXT DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS reports (
@@ -128,6 +135,21 @@ class Database:
                 WHERE id = ?
                 """,
                 (self._utc_now(), session_id),
+            )
+            self._connection.commit()
+
+    def save_feedback(self, event_id: int, feedback: str):
+        if feedback not in {"useful", "false_alarm", "noted"}:
+            raise ValueError("Invalid feedback value")
+
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE events
+                SET manager_feedback = ?
+                WHERE id = ?
+                """,
+                (feedback, event_id),
             )
             self._connection.commit()
 

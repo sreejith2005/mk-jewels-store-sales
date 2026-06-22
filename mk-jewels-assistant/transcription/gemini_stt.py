@@ -9,10 +9,18 @@ from google.genai import types
 
 # Add parent directory to sys.path to allow importing config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.exceptions import TriageError
+from core.logger import get_logger
+from core.schemas import validate_event
+
 try:
     from config import Config
 except ImportError:
     pass
+
+
+logger = get_logger(__name__)
+
 
 class GeminiAPIError(Exception):
     """Custom exception for Gemini API errors."""
@@ -26,6 +34,13 @@ def parse_json_response(text: str) -> dict:
     if text.endswith("```"):
         text = text[:-3]
     return json.loads(text.strip())
+
+
+def _validate_triage_result(result: dict) -> dict:
+    try:
+        return validate_event(result)
+    except ValueError as e:
+        raise TriageError(str(e)) from e
 
 
 def _gemini_config() -> types.GenerateContentConfig:
@@ -83,7 +98,7 @@ def _triage_openrouter(transcript_text: str, salesperson_name: str) -> dict:
     )
     result = parse_json_response(response.choices[0].message.content)
     result["transcript"] = transcript_text
-    return result
+    return _validate_triage_result(result)
 
 
 def _fallback_or_raise(
@@ -95,6 +110,8 @@ def _fallback_or_raise(
     if openrouter_fallback:
         try:
             return _triage_openrouter(transcript_text, salesperson_name)
+        except TriageError:
+            raise
         except Exception:
             pass
     raise error
@@ -151,7 +168,7 @@ def transcribe_and_triage(
     try:
         result = parse_json_response(response_text)
         transcript_text = result.get("transcript", "")
-        return result
+        return _validate_triage_result(result)
     except json.JSONDecodeError:
         # Retry once with a prompt asking Gemini to return only the JSON object again
         retry_prompt = "Please return ONLY the valid JSON object requested previously, and no other text."
@@ -165,25 +182,30 @@ def transcribe_and_triage(
                 config=_gemini_config(),
             )
             result = parse_json_response(retry_response.text)
-            transcript_text = result.get("transcript", "")
-            return result
+        except json.JSONDecodeError as e:
+            error = GeminiAPIError(f"Gemini API retry request or JSON parsing failed: {e}")
+            return _fallback_or_raise(
+                error, transcript_text, salesperson_name, openrouter_fallback
+            )
         except Exception as e:
             error = GeminiAPIError(f"Gemini API retry request or JSON parsing failed: {e}")
             return _fallback_or_raise(
                 error, transcript_text, salesperson_name, openrouter_fallback
             )
+        transcript_text = result.get("transcript", "")
+        return _validate_triage_result(result)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python gemini_stt.py <audio_file.wav>")
+        logger.info("Usage: python gemini_stt.py <audio_file.wav>")
         sys.exit(1)
 
     audio_file_path = sys.argv[1]
     if not os.path.exists(audio_file_path):
-        print(f"Error: Could not find audio file '{audio_file_path}'")
+        logger.error("Could not find audio file '%s'", audio_file_path)
         sys.exit(1)
 
-    print(f"Testing transcribe_and_triage with {audio_file_path}...")
+    logger.info("Testing transcribe_and_triage with %s...", audio_file_path)
     try:
         # Read WAV file directly for testing, though in production it might be raw PCM
         # Since transcribe_and_triage expects raw PCM bytes, we extract them from the WAV file
@@ -196,11 +218,11 @@ if __name__ == "__main__":
             sample_rate=sample_rate,
             salesperson_name="Test Salesperson"
         )
-        print("\n--- Result ---")
+        logger.info("--- Result ---")
         # Ensure stdout handles UTF-8 to prevent charmap errors on Windows
         import sys
         if sys.stdout.encoding.lower() != 'utf-8':
             sys.stdout.reconfigure(encoding='utf-8')
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        logger.info(json.dumps(result, indent=2, ensure_ascii=False))
     except Exception as e:
-        print(f"\nError: {e}")
+        logger.error("Error: %s", e)

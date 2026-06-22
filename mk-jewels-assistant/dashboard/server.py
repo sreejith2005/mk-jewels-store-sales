@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +63,17 @@ def get_events(session_id: str):
     events = db.get_session_events(session_id)
     events.sort(key=lambda event: (event.get("timestamp", ""), event.get("id", 0)), reverse=True)
     return jsonify(events)
+
+
+@app.post("/api/feedback/<int:event_id>")
+def save_feedback(event_id: int):
+    data = request.get_json(silent=True) or {}
+    feedback = data.get("feedback")
+    if feedback not in {"useful", "false_alarm", "noted"}:
+        return jsonify({"error": "Invalid feedback"}), 400
+
+    db.save_feedback(event_id, feedback)
+    return jsonify({"status": "ok"})
 
 
 @app.get("/api/stats/<session_id>")

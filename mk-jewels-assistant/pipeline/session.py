@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Callable, Optional
 
@@ -13,8 +14,35 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from alerting.console_alert import AlertManager
 from capture.mic_capture import MicCapture
 from config import Config
+from core.logger import get_logger
 from storage.db import Database
-from transcription.gemini_stt import GeminiAPIError, transcribe_and_triage
+from transcription.gemini_stt import GeminiAPIError
+
+
+logger = get_logger(__name__)
+
+
+def _load_triage_fn():
+    if Config.PIPELINE_MODE == "demo":
+        from transcription.gemini_stt import transcribe_and_triage
+
+        return transcribe_and_triage
+
+    if Config.PIPELINE_MODE == "production":
+        try:
+            from transcription.local_pipeline import transcribe_and_triage
+        except ImportError:
+            logger.error("local_pipeline not found, falling back to gemini_stt")
+            from transcription.gemini_stt import transcribe_and_triage
+
+        return transcribe_and_triage
+
+    from transcription.gemini_stt import transcribe_and_triage
+
+    return transcribe_and_triage
+
+
+TRIAGE_FN = _load_triage_fn()
 
 
 class Session:
@@ -76,7 +104,7 @@ class Session:
                     continue
 
                 future = executor.submit(
-                    transcribe_and_triage,
+                    TRIAGE_FN,
                     audio_bytes=chunk,
                     sample_rate=self.mic_capture.sample_rate,
                     salesperson_name=self.salesperson_name,
@@ -104,7 +132,7 @@ class Session:
         try:
             event = future.result()
         except GeminiAPIError as error:
-            print(f"Gemini API error for {self.salesperson_name}: {error}")
+            logger.error("Gemini API error for %s: %s", self.salesperson_name, error)
             return
 
         self.events.append(event)
@@ -124,10 +152,12 @@ class FileSession:
         wav_file_path: str,
         salesperson_name: str,
         on_event: Optional[Callable[[str, dict], None]] = None,
+        simulate_realtime: bool = False,
     ):
         self.wav_file_path = wav_file_path
         self.salesperson_name = salesperson_name
         self.on_event = on_event
+        self.simulate_realtime = simulate_realtime
         self.db = Database()
         self.session_id = self.db.create_session(salesperson_name)
         self.alert_manager = AlertManager()
@@ -158,7 +188,7 @@ class FileSession:
         try:
             sample_rate, audio_data = wavfile.read(self.wav_file_path)
         except Exception as error:
-            print(f"Failed to read WAV file '{self.wav_file_path}': {error}")
+            logger.error("Failed to read WAV file '%s': %s", self.wav_file_path, error)
             return
 
         audio_data = self._prepare_audio(audio_data)
@@ -181,12 +211,16 @@ class FileSession:
                     continue
 
                 future = executor.submit(
-                    transcribe_and_triage,
+                    TRIAGE_FN,
                     audio_bytes=chunk.tobytes(),
                     sample_rate=sample_rate,
                     salesperson_name=self.salesperson_name,
                 )
                 pending.add(future)
+
+                next_start = start + chunk_size_samples
+                if self.simulate_realtime and next_start < len(audio_data):
+                    time.sleep(Config.CHUNK_DURATION_SECONDS)
 
             while pending and not self._stop_event.is_set():
                 self._collect_completed(pending, timeout=1)
@@ -239,7 +273,7 @@ class FileSession:
         try:
             event = future.result()
         except GeminiAPIError as error:
-            print(f"Gemini API error for {self.salesperson_name}: {error}")
+            logger.error("Gemini API error for %s: %s", self.salesperson_name, error)
             return
 
         self.events.append(event)
