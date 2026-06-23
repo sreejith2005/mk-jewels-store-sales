@@ -185,15 +185,23 @@
     let recordingStartedAt = 0;
     let counterTimer = null;
     let isRecording = false;
+    let userInitiatedStop = false;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
 
     salespersonNameElement.textContent = salespersonName;
 
     startButton.addEventListener("click", startRecording);
-    stopButton.addEventListener("click", stopRecording);
+    stopButton.addEventListener("click", () => {
+      userInitiatedStop = true;
+      stopRecording();
+    });
     window.addEventListener("beforeunload", stopRecording);
 
     async function startRecording() {
       startButton.disabled = true;
+      userInitiatedStop = false;
+      reconnectAttempts = 0;
       message.textContent = "Requesting microphone permission...";
 
       try {
@@ -206,34 +214,62 @@
           }
         });
 
-        websocket = new WebSocket(websocketUrl);
-        websocket.binaryType = "arraybuffer";
-
-        websocket.addEventListener("open", () => {
-          setConnectionStatus(true);
-          startAudioPipeline();
-        });
-
-        websocket.addEventListener("close", () => {
-          setConnectionStatus(false);
-          if (isRecording) {
-            stopRecording("WebSocket disconnected.");
-          } else {
-            cleanup();
-          }
-        });
-
-        websocket.addEventListener("error", () => {
-          message.textContent = "WebSocket error. Check the recorder backend.";
-          setConnectionStatus(false);
-          if (!isRecording) {
-            cleanup();
-          }
-        });
+        connectWebSocket();
       } catch (error) {
         message.textContent = `Unable to start recording: ${error.message}`;
         cleanup();
       }
+    }
+
+    function connectWebSocket() {
+      websocket = new WebSocket(websocketUrl);
+      websocket.binaryType = "arraybuffer";
+
+      websocket.addEventListener("open", () => {
+        reconnectAttempts = 0;
+        setConnectionStatus(true);
+        if (isRecording) {
+          message.textContent = "";
+        } else {
+          startAudioPipeline();
+        }
+      });
+
+      websocket.addEventListener("close", () => {
+        setConnectionStatus(false);
+        if (isRecording && !userInitiatedStop) {
+          scheduleReconnect();
+        } else {
+          cleanup();
+        }
+      });
+
+      websocket.addEventListener("error", () => {
+        setConnectionStatus(false);
+        if (!isRecording) {
+          message.textContent = "WebSocket error. Check the recorder backend.";
+          cleanup();
+        }
+      });
+    }
+
+    function scheduleReconnect() {
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        message.textContent = `Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Tap Start to retry.`;
+        cleanup();
+        reconnectAttempts = 0;
+        return;
+      }
+
+      reconnectAttempts += 1;
+      const delaySeconds = Math.min(2 ** (reconnectAttempts - 1), 16);
+      message.textContent = `Connection lost. Reconnecting in ${delaySeconds}s... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+
+      window.setTimeout(() => {
+        if (isRecording && !userInitiatedStop) {
+          connectWebSocket();
+        }
+      }, delaySeconds * 1000);
     }
 
     function startAudioPipeline() {

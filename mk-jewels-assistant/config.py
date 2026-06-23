@@ -22,14 +22,22 @@ def _get_pipeline_mode() -> str:
 class Config:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
     PIPELINE_MODE = _get_pipeline_mode()
+    DASHBOARD_AUTH_USER = os.getenv("DASHBOARD_AUTH_USER", "admin")
+    DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "")
     ALERT_THRESHOLD = os.getenv("ALERT_THRESHOLD", "medium")
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
+    DEVICE = os.getenv("DEVICE", "cuda")
     SILENCE_THRESHOLD = int(os.getenv("SILENCE_THRESHOLD", "200"))
     DB_PATH = os.getenv("DB_PATH", "sessions.db")
+    POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+    REPORT_HOUR = int(os.getenv("REPORT_HOUR", "21"))
 
     @classmethod
     def validate(cls) -> None:

@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const API_BASE = "http://127.0.0.1:5000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:5000";
 const REFRESH_MS = 8000;
 const GOLD = "#B8860B";
 

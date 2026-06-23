@@ -86,6 +86,7 @@ def main():
 async def start_live_phone_capture():
     from capture.ws_receiver import WebSocketAudioServer
     from dashboard.server import app
+    from scheduler import start_scheduler, stop_scheduler
 
     local_ip = socket.gethostbyname(socket.gethostname())
     print(f"Open this URL on your phone: http://{local_ip}:5000/recorder?name=YourName")
@@ -98,7 +99,11 @@ async def start_live_phone_capture():
         use_reloader=False,
     )
 
-    await asyncio.gather(websocket_server.start(), flask_server)
+    scheduler = start_scheduler()
+    try:
+        await asyncio.gather(websocket_server.start(), flask_server)
+    finally:
+        stop_scheduler(scheduler)
 
 
 if __name__ == "__main__":

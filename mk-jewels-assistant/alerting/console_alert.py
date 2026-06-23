@@ -25,24 +25,37 @@ class AlertManager:
         channel_id = self.config.DISCORD_CHANNEL_ID
         if not token or not channel_id:
             logger.warning("Discord alert skipped because bot token or channel ID is missing.")
-            return
+        else:
+            url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+            headers = {
+                "Authorization": f"Bot {token}",
+                "Content-Type": "application/json",
+            }
 
-        url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
-        headers = {
-            "Authorization": f"Bot {token}",
-            "Content-Type": "application/json",
-        }
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json={"content": message},
+                    timeout=10,
+                )
+                response.raise_for_status()
+            except requests.RequestException as error:
+                logger.error("Discord alert failed: %s", error)
 
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json={"content": message},
-                timeout=10,
-            )
-            response.raise_for_status()
-        except requests.RequestException as error:
-            logger.error("Discord alert failed: %s", error)
+        token = self.config.TELEGRAM_BOT_TOKEN
+        chat_id = self.config.TELEGRAM_CHAT_ID
+        if not token or not chat_id:
+            logger.warning("Telegram alert skipped: credentials not configured")
+        else:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+            try:
+                response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
+                logger.info(f"Telegram alert sent for {salesperson_name}")
+            except requests.RequestException as error:
+                logger.warning(f"Telegram alert failed: {error}")
 
     def _format_message(self, salesperson_name: str, event: dict) -> str:
         priority = event.get("alert_priority", "none")

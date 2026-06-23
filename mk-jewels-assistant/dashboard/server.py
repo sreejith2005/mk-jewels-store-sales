@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,12 +13,36 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 DASHBOARD_ROOT = Path(__file__).resolve().parent
 
+from config import Config  # noqa: E402
 from storage.db import Database  # noqa: E402
 
 
 app = Flask(__name__, static_folder=None)
 CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"])
 db = Database()
+
+
+@app.before_request
+def require_dashboard_auth() -> Any:
+    if request.method == "GET" and request.path == "/recorder":
+        return None
+
+    if not Config.DASHBOARD_AUTH_PASS:
+        return None
+
+    auth = request.authorization
+    if (
+        auth
+        and hmac.compare_digest(auth.username or "", Config.DASHBOARD_AUTH_USER)
+        and hmac.compare_digest(auth.password or "", Config.DASHBOARD_AUTH_PASS)
+    ):
+        return None
+
+    return (
+        jsonify({"error": "Authentication required"}),
+        401,
+        {"WWW-Authenticate": 'Basic realm="MK Jewels Dashboard"'},
+    )
 
 
 @app.get("/recorder")
@@ -102,5 +127,8 @@ def _count_flag(events: list[dict[str, Any]], key: str) -> int:
     return sum(1 for event in events if bool(event.get(key)))
 
 
+# DEVELOPMENT ONLY — do not use for production
+# Production: gunicorn -c dashboard/gunicorn_config.py dashboard.server:app
+# Or set PIPELINE_MODE=production in .env — main.py handles the switch
 if __name__ == "__main__":
     app.run(port=5000)

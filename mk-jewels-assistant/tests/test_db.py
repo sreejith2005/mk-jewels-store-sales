@@ -109,6 +109,71 @@ def test_get_today_events_excludes_yesterday(db):
     assert events[0]["transcript"] == "Today event"
 
 
+def test_delete_events_older_than_deletes_only_expired_rows(db):
+    now = datetime.now(timezone.utc)
+    old_timestamp = now - timedelta(days=8)
+    recent_timestamp = now - timedelta(days=2)
+
+    with db._lock:
+        db._connection.executemany(
+            """
+            INSERT INTO events (
+                session_id,
+                salesperson_name,
+                timestamp,
+                transcript,
+                objection_detected,
+                price_concern,
+                certification_question,
+                upsell_miss,
+                knowledge_gap,
+                intent_signal,
+                alert_priority,
+                reasoning
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "old-session",
+                    "Maya",
+                    old_timestamp.isoformat(),
+                    "Old event",
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "none",
+                    "Old",
+                ),
+                (
+                    "recent-session",
+                    "Maya",
+                    recent_timestamp.isoformat(),
+                    "Recent event",
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "none",
+                    "Recent",
+                ),
+            ],
+        )
+        db._connection.commit()
+
+    deleted_count = db.delete_events_older_than(7)
+    remaining_events = db.get_session_events("recent-session")
+
+    assert deleted_count == 1
+    assert len(remaining_events) == 1
+    assert remaining_events[0]["transcript"] == "Recent event"
+
+
 def test_save_feedback_updates_manager_feedback(db):
     session_id = db.create_session("Maya")
     db.log_event(session_id, "Maya", event_dict())

@@ -10,3 +10,6 @@ __pycache__/
 *.mp4
 *.m4a
 skills/
+*.log
+logs/
+.pytest_cache/
