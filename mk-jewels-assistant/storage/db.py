@@ -374,6 +374,40 @@ class Database:
 
         return [dict(row) for row in rows]
 
+    def get_recent_sessions(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT DISTINCT salesperson_name, id as session_id, start_time
+                            FROM sessions
+                            ORDER BY start_time DESC
+                            LIMIT %s
+                            """,
+                            (limit,),
+                        )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch recent sessions.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT DISTINCT salesperson_name, id as session_id, start_time
+                FROM sessions
+                ORDER BY start_time DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def get_today_events(self, salesperson_name: str | None = None) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)

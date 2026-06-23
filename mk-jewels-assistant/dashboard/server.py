@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hmac
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from storage.db import Database  # noqa: E402
 
 
 app = Flask(__name__, static_folder=None)
-CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"])
+CORS(app, origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","))
 db = Database()
 
 
@@ -52,26 +53,7 @@ def get_recorder():
 
 @app.get("/api/sessions")
 def get_today_sessions():
-    with db._lock:
-        rows = db._connection.execute(
-            """
-            SELECT DISTINCT salesperson_name, id as session_id, start_time
-            FROM sessions
-            ORDER BY start_time DESC
-            LIMIT 50
-            """
-        ).fetchall()
-
-    return jsonify(
-        [
-            {
-                "salesperson_name": row["salesperson_name"],
-                "session_id": row["session_id"],
-                "start_time": row["start_time"],
-            }
-            for row in rows
-        ]
-    )
+    return jsonify(db.get_recent_sessions())
 
 
 @app.get("/api/debug")
@@ -127,8 +109,7 @@ def _count_flag(events: list[dict[str, Any]], key: str) -> int:
     return sum(1 for event in events if bool(event.get(key)))
 
 
-# DEVELOPMENT ONLY — do not use for production
+# DEVELOPMENT ONLY - do not use for production.
 # Production: gunicorn -c dashboard/gunicorn_config.py dashboard.server:app
-# Or set PIPELINE_MODE=production in .env — main.py handles the switch
 if __name__ == "__main__":
-    app.run(port=5000)
+    app.run(port=Config.FLASK_PORT)

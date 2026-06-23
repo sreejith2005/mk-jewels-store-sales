@@ -12,6 +12,17 @@ from pipeline.session import FileSession, Session
 APP_DIR = Path(__file__).parent
 
 
+def _get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 def main():
     run_mode = input(
         "Run mode: (1) Live mic  (2) Test with audio file  (3) Start dashboard server  (4) Generate end-of-day report  (5) Start live phone capture: "
@@ -22,7 +33,7 @@ def main():
             from dashboard.server import app
 
             print("Starting dashboard server in demo mode using Flask's built-in server.")
-            app.run(port=5000, debug=False)
+            app.run(port=Config.FLASK_PORT, debug=False)
         else:
             print("Starting dashboard server in production mode using Gunicorn.")
             subprocess.Popen(
@@ -88,14 +99,17 @@ async def start_live_phone_capture():
     from dashboard.server import app
     from scheduler import start_scheduler, stop_scheduler
 
-    local_ip = socket.gethostbyname(socket.gethostname())
-    print(f"Open this URL on your phone: http://{local_ip}:5000/recorder?name=YourName")
+    local_ip = _get_lan_ip()
+    print(
+        f"Open this URL on your phone: "
+        f"http://{local_ip}:{Config.FLASK_PORT}/recorder?name=YourName"
+    )
 
     websocket_server = WebSocketAudioServer()
     flask_server = asyncio.to_thread(
         app.run,
-        host="0.0.0.0",
-        port=5000,
+        host="0.0.0.0",  # binds all interfaces for LAN access.
+        port=Config.FLASK_PORT,
         use_reloader=False,
     )
 

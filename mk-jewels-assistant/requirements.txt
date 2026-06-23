@@ -6,14 +6,11 @@ scipy
 openai
 flask
 flask-cors
-aiohttp
 requests
 websockets>=16.0
 psycopg2-binary
 apscheduler
-pytz
 gunicorn
 pytest
 transformers
 torch
-torchaudio

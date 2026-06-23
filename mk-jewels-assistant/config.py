@@ -30,7 +30,6 @@ class Config:
     PIPELINE_MODE = _get_pipeline_mode()
     DASHBOARD_AUTH_USER = os.getenv("DASHBOARD_AUTH_USER", "admin")
     DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "")
-    ALERT_THRESHOLD = os.getenv("ALERT_THRESHOLD", "medium")
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
@@ -38,24 +37,20 @@ class Config:
     DB_PATH = os.getenv("DB_PATH", "sessions.db")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "")
     REPORT_HOUR = int(os.getenv("REPORT_HOUR", "21"))
+    WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
+    WS_PORT = int(os.getenv("WS_PORT", "8765"))
+    FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
+    CORS_ORIGINS = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
 
     @classmethod
-    def validate(cls) -> None:
-        required_keys = [
-            "GEMINI_API_KEY",
-            "DISCORD_BOT_TOKEN",
-            "DISCORD_CHANNEL_ID",
-        ]
-        missing_keys = [
-            key
-            for key in required_keys
-            if not isinstance(getattr(cls, key), str) or not getattr(cls, key).strip()
-        ]
-
-        if missing_keys:
-            print(
-                "Startup error: missing required environment keys: "
-                + ", ".join(missing_keys),
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+    def validate(cls):
+        missing = []
+        if not cls.GEMINI_API_KEY:
+            missing.append("GEMINI_API_KEY")
+        if missing:
+            import sys
+            print(f"ERROR: Missing required config: {', '.join(missing)}")
+            sys.exit(1)

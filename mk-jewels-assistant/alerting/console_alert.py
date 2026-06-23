@@ -1,3 +1,9 @@
+﻿"""Alert delivery: console logging, Discord (optional), Telegram (optional).
+Configure via DISCORD_BOT_TOKEN/DISCORD_CHANNEL_ID and
+TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env.
+Leave credentials blank to disable either channel silently.
+"""
+
 import requests
 
 from config import Config
@@ -16,7 +22,7 @@ class AlertManager:
 
     def send_alert(self, salesperson_name: str, event: dict):
         message = self._format_message(salesperson_name, event)
-        logger.info(message)
+        logger.info("%s", message)
 
         if not self.should_alert(event):
             return
@@ -53,9 +59,9 @@ class AlertManager:
             try:
                 response = requests.post(url, json=payload, timeout=10)
                 response.raise_for_status()
-                logger.info(f"Telegram alert sent for {salesperson_name}")
+                logger.info("Telegram alert sent for %s", salesperson_name)
             except requests.RequestException as error:
-                logger.warning(f"Telegram alert failed: {error}")
+                logger.warning("Telegram alert failed: %s", error)
 
     def _format_message(self, salesperson_name: str, event: dict) -> str:
         priority = event.get("alert_priority", "none")
@@ -63,7 +69,7 @@ class AlertManager:
         transcript = event.get("transcript", "")[:120]
 
         return (
-            "🚨 MK Jewels Alert\n"
+            "MK Jewels ALERT\n"
             f"Salesperson: {salesperson_name}\n"
             f"Priority: {priority}\n"
             f"Signal: {reasoning}\n"

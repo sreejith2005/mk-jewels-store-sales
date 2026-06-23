@@ -14,9 +14,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alerting.console_alert import AlertManager
 from config import Config
+from core.exceptions import PipelineError
+from core.logger import get_logger
 from pipeline.session import TRIAGE_FN, Session
 from storage.db import Database
 from transcription.gemini_stt import GeminiAPIError
+
+
+logger = get_logger(__name__)
 
 
 class _DirectAudioSession(Session):
@@ -91,8 +96,8 @@ class _DirectAudioSession(Session):
     def _handle_future(self, future):
         try:
             event = future.result()
-        except GeminiAPIError as error:
-            print(f"Gemini API error for {self.salesperson_name}: {error}")
+        except (GeminiAPIError, PipelineError) as error:
+            logger.error("Pipeline error for %s: %s", self.salesperson_name, error)
             return
 
         self.events.append(event)
@@ -104,14 +109,14 @@ class _DirectAudioSession(Session):
 
 
 class WebSocketAudioServer:
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, host: str = Config.WS_HOST, port: int = Config.WS_PORT):
         self.host = host
         self.port = port
         self.chunk_size_bytes = Config.SAMPLE_RATE * 2 * Config.CHUNK_DURATION_SECONDS
 
     async def start(self):
         async with serve(self._handle_connection, self.host, self.port):
-            print(f"WebSocket audio server listening on {self.host}:{self.port}")
+            logger.info("WebSocket audio server listening on %s:%s", self.host, self.port)
             await asyncio.Future()
 
     async def _handle_connection(self, websocket):
