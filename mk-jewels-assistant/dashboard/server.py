@@ -14,6 +14,7 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 DASHBOARD_ROOT = Path(__file__).resolve().parent
 
+from alerting.console_alert import AlertManager  # noqa: E402
 from config import Config  # noqa: E402
 from storage.db import Database  # noqa: E402
 
@@ -53,7 +54,18 @@ def get_recorder():
 
 @app.get("/api/sessions")
 def get_today_sessions():
-    return jsonify(db.get_recent_sessions())
+    store_id = request.args.get("store_id", type=int)
+    return jsonify(db.get_recent_sessions(store_id=store_id))
+
+
+@app.get("/api/stores")
+def get_stores():
+    return jsonify(db.get_stores())
+
+
+@app.get("/api/stores/<int:store_id>/salespersons")
+def get_store_salespersons(store_id: int):
+    return jsonify(db.get_salespersons(store_id))
 
 
 @app.get("/api/debug")
@@ -83,6 +95,41 @@ def save_feedback(event_id: int):
     return jsonify({"status": "ok"})
 
 
+@app.post("/api/test_alert")
+def send_test_alert():
+    data = request.get_json(silent=True) or {}
+    store_name = _clean_text(data.get("store_name"), "MK Jewels", max_length=100)
+    salesperson_name = _clean_text(data.get("salesperson_name"), "Test", max_length=100)
+    event = {
+        "transcript": "This is a test alert from the MK Jewels dashboard.",
+        "objection_detected": True,
+        "price_concern": True,
+        "certification_question": False,
+        "upsell_miss": False,
+        "knowledge_gap": False,
+        "intent_signal": True,
+        "alert_priority": "high",
+        "reasoning": "Manual dashboard test alert.",
+    }
+
+    try:
+        AlertManager().send_alert(
+            salesperson_name=salesperson_name,
+            event=event,
+            store_name=store_name,
+        )
+    except Exception as error:
+        return jsonify({"status": "error", "detail": str(error)}), 500
+
+    return jsonify({"status": "sent"})
+
+
+@app.get("/api/alerts/log")
+def get_alert_log():
+    limit = request.args.get("limit", default=20, type=int)
+    return jsonify(db.get_alert_log(limit=limit))
+
+
 @app.get("/api/stats/<session_id>")
 def get_stats(session_id: str):
     events = db.get_session_events(session_id)
@@ -103,6 +150,17 @@ def get_stats(session_id: str):
 @app.get("/api/reports/<salesperson_name>")
 def get_reports(salesperson_name: str):
     return jsonify(db.get_recent_reports(salesperson_name, days=7))
+
+
+def _clean_text(value: Any, default: str, max_length: int) -> str:
+    if not isinstance(value, str):
+        return default
+
+    cleaned = value.strip()
+    if not cleaned:
+        return default
+
+    return cleaned[:max_length]
 
 
 def _count_flag(events: list[dict[str, Any]], key: str) -> int:

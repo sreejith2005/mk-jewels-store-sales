@@ -25,12 +25,19 @@ logger = get_logger(__name__)
 
 
 class _DirectAudioSession(Session):
-    def __init__(self, salesperson_name: str):
+    def __init__(
+        self,
+        salesperson_name: str,
+        store_id: int | None = None,
+        store_name: str = "MK Jewels",
+    ):
         self.salesperson_name = salesperson_name
+        self.store_id = store_id
+        self.store_name = store_name
         self.device_index = None
         self.on_event = None
         self.db = Database()
-        self.session_id = self.db.create_session(salesperson_name)
+        self.session_id = self.db.create_session(salesperson_name, store_id=store_id)
         self.alert_manager = AlertManager()
 
         self.events = []
@@ -102,10 +109,15 @@ class _DirectAudioSession(Session):
 
         self.events.append(event)
         self.transcript_log.append(event.get("transcript", ""))
-        self.db.log_event(self.session_id, self.salesperson_name, event)
+        event_id = self.db.log_event(self.session_id, self.salesperson_name, event)
 
         if self.alert_manager.should_alert(event):
-            self.alert_manager.send_alert(self.salesperson_name, event)
+            self.alert_manager.send_alert(
+                self.salesperson_name,
+                event,
+                store_name=self.store_name,
+                event_id=event_id,
+            )
 
 
 class WebSocketAudioServer:
@@ -120,12 +132,18 @@ class WebSocketAudioServer:
             await asyncio.Future()
 
     async def _handle_connection(self, websocket):
-        salesperson_name = self._salesperson_name_from_path(websocket.request.path)
+        salesperson_name, store_id, store_name = self._session_context_from_path(
+            websocket.request.path
+        )
         if not salesperson_name:
             await websocket.close(code=1008, reason="Missing name query parameter")
             return
 
-        session = _DirectAudioSession(salesperson_name)
+        session = _DirectAudioSession(
+            salesperson_name,
+            store_id=store_id,
+            store_name=store_name,
+        )
         session.start()
         buffer = bytearray()
 
@@ -152,17 +170,55 @@ class WebSocketAudioServer:
                 await asyncio.sleep(0.1)
             session.stop()
 
-    def _salesperson_name_from_path(self, path: str) -> Optional[str]:
+    def _session_context_from_path(self, path: str) -> tuple[Optional[str], int | None, str]:
         query = parse_qs(urlparse(path).query)
         names = query.get("name", [])
         if not names:
-            return None
+            return None, None, "MK Jewels"
 
         name = names[0].strip()
         if not name:
+            return None, None, "MK Jewels"
+
+        store_id = self._store_id_from_query(query)
+        store_name = self._store_name_from_query(query, store_id)
+
+        return name[:100], store_id, store_name
+
+    def _store_id_from_query(self, query: dict[str, list[str]]) -> int | None:
+        store_ids = query.get("store_id", [])
+        if not store_ids:
             return None
 
-        return name[:100]
+        try:
+            store_id = int(store_ids[0])
+        except (TypeError, ValueError):
+            logger.warning("Ignoring invalid store_id from recorder connection.")
+            return None
+
+        return store_id if store_id > 0 else None
+
+    def _store_name_from_query(
+        self,
+        query: dict[str, list[str]],
+        store_id: int | None,
+    ) -> str:
+        store_names = query.get("store_name", [])
+        if store_names and store_names[0].strip():
+            return store_names[0].strip()[:100]
+
+        if store_id is None:
+            return "MK Jewels"
+
+        db = Database()
+        try:
+            return db.get_store_name(store_id) or "MK Jewels"
+        except Exception as error:
+            logger.warning("Failed to resolve store name for store_id=%s: %s", store_id, error)
+            return "MK Jewels"
+        finally:
+            db.close()
+
 
 
 def start_server():

@@ -59,12 +59,58 @@ class Database:
                     with connection.cursor() as cursor:
                         cursor.execute(
                             """
+                            CREATE TABLE IF NOT EXISTS stores (
+                                id SERIAL PRIMARY KEY,
+                                name TEXT NOT NULL UNIQUE,
+                                slug TEXT NOT NULL UNIQUE,
+                                created_at TEXT
+                            )
+                            """
+                        )
+                        cursor.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS salespersons (
+                                id SERIAL PRIMARY KEY,
+                                store_id INTEGER NOT NULL REFERENCES stores(id),
+                                name TEXT NOT NULL,
+                                designation TEXT NOT NULL,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                created_at TEXT
+                            )
+                            """
+                        )
+                        cursor.execute(
+                            """
                             CREATE TABLE IF NOT EXISTS sessions (
                                 id TEXT PRIMARY KEY,
                                 salesperson_name TEXT,
+                                store_id INTEGER REFERENCES stores(id) DEFAULT NULL,
+                                salesperson_id INTEGER REFERENCES salespersons(id) DEFAULT NULL,
                                 start_time TEXT,
                                 end_time TEXT
                             )
+                            """
+                        )
+                        cursor.execute(
+                            """
+                            DO $$
+                            BEGIN
+                                ALTER TABLE sessions
+                                ADD COLUMN store_id INTEGER REFERENCES stores(id) DEFAULT NULL;
+                            EXCEPTION WHEN duplicate_column THEN
+                                NULL;
+                            END $$;
+                            """
+                        )
+                        cursor.execute(
+                            """
+                            DO $$
+                            BEGIN
+                                ALTER TABLE sessions
+                                ADD COLUMN salesperson_id INTEGER REFERENCES salespersons(id) DEFAULT NULL;
+                            EXCEPTION WHEN duplicate_column THEN
+                                NULL;
+                            END $$;
                             """
                         )
                         cursor.execute(
@@ -100,6 +146,21 @@ class Database:
                         )
                         cursor.execute(
                             """
+                            CREATE TABLE IF NOT EXISTS alert_log (
+                                id SERIAL PRIMARY KEY,
+                                event_id INTEGER REFERENCES events(id) DEFAULT NULL,
+                                salesperson_name TEXT,
+                                store_name TEXT,
+                                priority TEXT,
+                                channel TEXT,
+                                status TEXT,
+                                error_text TEXT DEFAULT NULL,
+                                sent_at TEXT
+                            )
+                            """
+                        )
+                        cursor.execute(
+                            """
                             CREATE TABLE IF NOT EXISTS reports (
                                 id SERIAL PRIMARY KEY,
                                 salesperson_name TEXT,
@@ -120,14 +181,50 @@ class Database:
         with self._lock:
             self._connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS stores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    slug TEXT NOT NULL UNIQUE,
+                    created_at TEXT
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS salespersons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    store_id INTEGER NOT NULL REFERENCES stores(id),
+                    name TEXT NOT NULL,
+                    designation TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT
+                )
+                """
+            )
+            self._connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
                     salesperson_name TEXT,
+                    store_id INTEGER REFERENCES stores(id) DEFAULT NULL,
+                    salesperson_id INTEGER REFERENCES salespersons(id) DEFAULT NULL,
                     start_time TEXT,
                     end_time TEXT
                 )
                 """
             )
+            try:
+                self._connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN store_id INTEGER REFERENCES stores(id) DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self._connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN salesperson_id INTEGER REFERENCES salespersons(id) DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -145,6 +242,21 @@ class Database:
                     alert_priority TEXT,
                     reasoning TEXT,
                     manager_feedback TEXT DEFAULT NULL
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER REFERENCES events(id) DEFAULT NULL,
+                    salesperson_name TEXT,
+                    store_name TEXT,
+                    priority TEXT,
+                    channel TEXT,
+                    status TEXT,
+                    error_text TEXT DEFAULT NULL,
+                    sent_at TEXT
                 )
                 """
             )
@@ -167,7 +279,163 @@ class Database:
             )
             self._connection.commit()
 
-    def create_session(self, salesperson_name: str) -> str:
+    def get_stores(self) -> list[dict]:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT id, name, slug, created_at
+                            FROM stores
+                            ORDER BY name ASC
+                            """
+                        )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch stores.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT id, name, slug, created_at
+                FROM stores
+                ORDER BY name ASC
+                """
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_salespersons(self, store_id: int) -> list[dict]:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT id, store_id, name, designation, is_active, created_at
+                            FROM salespersons
+                            WHERE store_id = %s
+                                AND is_active = 1
+                            ORDER BY
+                                CASE designation
+                                    WHEN 'Sales Manager' THEN 1
+                                    WHEN 'Senior Sales Executive' THEN 2
+                                    WHEN 'Sales Executive' THEN 3
+                                    WHEN 'Sales Assistant' THEN 4
+                                    ELSE 5
+                                END,
+                                name ASC
+                            """,
+                            (store_id,),
+                        )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch salespersons.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT id, store_id, name, designation, is_active, created_at
+                FROM salespersons
+                WHERE store_id = ?
+                    AND is_active = 1
+                ORDER BY
+                    CASE designation
+                        WHEN 'Sales Manager' THEN 1
+                        WHEN 'Senior Sales Executive' THEN 2
+                        WHEN 'Sales Executive' THEN 3
+                        WHEN 'Sales Assistant' THEN 4
+                        ELSE 5
+                    END,
+                    name ASC
+                """,
+                (store_id,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_salesperson(self, salesperson_id: int) -> dict | None:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT id, store_id, name, designation, is_active, created_at
+                            FROM salespersons
+                            WHERE id = %s
+                            """,
+                            (salesperson_id,),
+                        )
+                        rows = self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        return rows[0] if rows else None
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch salesperson.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            row = self._connection.execute(
+                """
+                SELECT id, store_id, name, designation, is_active, created_at
+                FROM salespersons
+                WHERE id = ?
+                """,
+                (salesperson_id,),
+            ).fetchone()
+
+        return dict(row) if row else None
+
+    def get_store_name(self, store_id: int | None) -> str | None:
+        if store_id is None:
+            return None
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT name
+                            FROM stores
+                            WHERE id = %s
+                            """,
+                            (store_id,),
+                        )
+                        row = cursor.fetchone()
+                        return row[0] if row else None
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch store name.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            row = self._connection.execute(
+                """
+                SELECT name
+                FROM stores
+                WHERE id = ?
+                """,
+                (store_id,),
+            ).fetchone()
+
+        return row["name"] if row else None
+
+    def create_session(
+        self,
+        salesperson_name: str,
+        store_id: int | None = None,
+        salesperson_id: int | None = None,
+    ) -> str:
         session_id = str(uuid.uuid4())
         start_time = self._utc_now()
 
@@ -178,10 +446,23 @@ class Database:
                     with connection.cursor() as cursor:
                         cursor.execute(
                             """
-                            INSERT INTO sessions (id, salesperson_name, start_time, end_time)
-                            VALUES (%s, %s, %s, NULL)
+                            INSERT INTO sessions (
+                                id,
+                                salesperson_name,
+                                store_id,
+                                salesperson_id,
+                                start_time,
+                                end_time
+                            )
+                            VALUES (%s, %s, %s, %s, %s, NULL)
                             """,
-                            (session_id, salesperson_name, start_time),
+                            (
+                                session_id,
+                                salesperson_name,
+                                store_id,
+                                salesperson_id,
+                                start_time,
+                            ),
                         )
                     connection.commit()
                 except Exception as exc:
@@ -193,16 +474,29 @@ class Database:
 
             self._connection.execute(
                 """
-                INSERT INTO sessions (id, salesperson_name, start_time, end_time)
-                VALUES (?, ?, ?, NULL)
+                INSERT INTO sessions (
+                    id,
+                    salesperson_name,
+                    store_id,
+                    salesperson_id,
+                    start_time,
+                    end_time
+                )
+                VALUES (?, ?, ?, ?, ?, NULL)
                 """,
-                (session_id, salesperson_name, start_time),
+                (
+                    session_id,
+                    salesperson_name,
+                    store_id,
+                    salesperson_id,
+                    start_time,
+                ),
             )
             self._connection.commit()
 
         return session_id
 
-    def log_event(self, session_id: str, salesperson_name: str, event_dict: dict[str, Any]):
+    def log_event(self, session_id: str, salesperson_name: str, event_dict: dict[str, Any]) -> int | None:
         values = (
             session_id,
             salesperson_name,
@@ -240,18 +534,20 @@ class Database:
                                 reasoning
                             )
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
                             """,
                             values,
                         )
+                        event_id = cursor.fetchone()[0]
                     connection.commit()
                 except Exception as exc:
                     connection.rollback()
                     raise DatabaseError("Failed to log event.") from exc
                 finally:
                     self._pool.putconn(connection)
-                return
+                return event_id
 
-            self._connection.execute(
+            cursor = self._connection.execute(
                 """
                 INSERT INTO events (
                     session_id,
@@ -272,6 +568,7 @@ class Database:
                 values,
             )
             self._connection.commit()
+            return cursor.lastrowid
 
     def close_session(self, session_id: str):
         with self._lock:
@@ -374,7 +671,27 @@ class Database:
 
         return [dict(row) for row in rows]
 
-    def get_recent_sessions(self, limit: int = 50) -> list[dict]:
+    def log_alert(
+        self,
+        salesperson_name: str,
+        store_name: str,
+        priority: str,
+        channel: str,
+        status: str,
+        event_id: int | None = None,
+        error_text: str | None = None,
+    ) -> None:
+        values = (
+            event_id,
+            salesperson_name,
+            store_name,
+            priority,
+            channel,
+            status,
+            error_text,
+            self._utc_now(),
+        )
+
         with self._lock:
             if self._backend == "postgres":
                 connection = self._pool.getconn()
@@ -382,9 +699,59 @@ class Database:
                     with connection.cursor() as cursor:
                         cursor.execute(
                             """
-                            SELECT DISTINCT salesperson_name, id as session_id, start_time
-                            FROM sessions
-                            ORDER BY start_time DESC
+                            INSERT INTO alert_log (
+                                event_id,
+                                salesperson_name,
+                                store_name,
+                                priority,
+                                channel,
+                                status,
+                                error_text,
+                                sent_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            values,
+                        )
+                    connection.commit()
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to log alert delivery.") from exc
+                finally:
+                    self._pool.putconn(connection)
+                return
+
+            self._connection.execute(
+                """
+                INSERT INTO alert_log (
+                    event_id,
+                    salesperson_name,
+                    store_name,
+                    priority,
+                    channel,
+                    status,
+                    error_text,
+                    sent_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values,
+            )
+            self._connection.commit()
+
+    def get_alert_log(self, limit: int = 20) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 200))
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT *
+                            FROM alert_log
+                            ORDER BY sent_at DESC, id DESC
                             LIMIT %s
                             """,
                             (limit,),
@@ -392,19 +759,105 @@ class Database:
                         return self._rows_to_dicts(cursor.description, cursor.fetchall())
                 except Exception as exc:
                     connection.rollback()
-                    raise DatabaseError("Failed to fetch recent sessions.") from exc
+                    raise DatabaseError("Failed to fetch alert log.") from exc
                 finally:
                     self._pool.putconn(connection)
 
             rows = self._connection.execute(
                 """
-                SELECT DISTINCT salesperson_name, id as session_id, start_time
-                FROM sessions
-                ORDER BY start_time DESC
+                SELECT *
+                FROM alert_log
+                ORDER BY sent_at DESC, id DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_recent_sessions(
+        self,
+        limit: int = 50,
+        store_id: int | None = None,
+    ) -> list[dict]:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        if store_id is not None:
+                            cursor.execute(
+                                """
+                                SELECT DISTINCT
+                                    salesperson_name,
+                                    id as session_id,
+                                    store_id,
+                                    salesperson_id,
+                                    start_time,
+                                    end_time
+                                FROM sessions
+                                WHERE store_id = %s
+                                ORDER BY start_time DESC
+                                LIMIT %s
+                                """,
+                                (store_id, limit),
+                            )
+                        else:
+                            cursor.execute(
+                                """
+                                SELECT DISTINCT
+                                    salesperson_name,
+                                    id as session_id,
+                                    store_id,
+                                    salesperson_id,
+                                    start_time,
+                                    end_time
+                                FROM sessions
+                                ORDER BY start_time DESC
+                                LIMIT %s
+                                """,
+                                (limit,),
+                            )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch recent sessions.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            if store_id is not None:
+                rows = self._connection.execute(
+                    """
+                    SELECT DISTINCT
+                        salesperson_name,
+                        id as session_id,
+                        store_id,
+                        salesperson_id,
+                        start_time,
+                        end_time
+                    FROM sessions
+                    WHERE store_id = ?
+                    ORDER BY start_time DESC
+                    LIMIT ?
+                    """,
+                    (store_id, limit),
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """
+                    SELECT DISTINCT
+                        salesperson_name,
+                        id as session_id,
+                        store_id,
+                        salesperson_id,
+                        start_time,
+                        end_time
+                    FROM sessions
+                    ORDER BY start_time DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
 
         return [dict(row) for row in rows]
 

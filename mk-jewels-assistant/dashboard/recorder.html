@@ -6,10 +6,10 @@
   <title>MK Jewels Recorder</title>
   <style>
     :root {
-      color-scheme: light;
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f6f7fb;
-      color: #172033;
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f0f0f;
+      color: #ffffff;
     }
 
     * {
@@ -22,35 +22,154 @@
       display: grid;
       place-items: center;
       padding: 24px;
+      background: #0f0f0f;
     }
 
     main {
       width: min(720px, 100%);
-      background: #ffffff;
-      border: 1px solid #d9deea;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
       border-radius: 8px;
-      padding: 32px;
-      box-shadow: 0 12px 40px rgba(23, 32, 51, 0.08);
-      text-align: center;
+      padding: 28px;
     }
 
     h1 {
       margin: 0 0 10px;
-      font-size: clamp(32px, 6vw, 54px);
-      line-height: 1.05;
+      font-size: clamp(28px, 6vw, 46px);
+      line-height: 1.08;
+      letter-spacing: 0;
+      text-align: center;
+    }
+
+    .subheading,
+    .label,
+    #message {
+      color: #888888;
+    }
+
+    .subheading {
+      margin: 0 0 28px;
+      font-size: 17px;
+      text-align: center;
     }
 
     .label {
       margin: 0;
-      color: #526070;
-      font-size: 18px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
 
-    .salesperson {
-      margin: 18px 0 28px;
-      font-size: clamp(28px, 5vw, 44px);
+    .screen {
+      min-height: 420px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .screen-header {
+      position: relative;
+      margin-bottom: 12px;
+    }
+
+    .selection-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    button {
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      cursor: pointer;
+      font: inherit;
+      color: #ffffff;
+      background: #1a1a1a;
+      transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+    }
+
+    button:hover:not(:disabled),
+    button:focus-visible {
+      border-color: #B8860B;
+      color: #ffffff;
+      outline: none;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .selection-button {
+      width: 100%;
+      min-height: 76px;
+      padding: 18px 20px;
+      text-align: left;
+      border-left: 3px solid transparent;
+    }
+
+    .selection-button:hover,
+    .selection-button:focus-visible {
+      border-left-color: #B8860B;
+      background: #202020;
+    }
+
+    .store-name,
+    .salesperson-button-name {
+      display: block;
+      font-size: 20px;
       font-weight: 700;
-      color: #0f5132;
+    }
+
+    .salesperson-button-designation {
+      display: block;
+      margin-top: 5px;
+      color: #888888;
+      font-size: 15px;
+    }
+
+    .back-button {
+      position: absolute;
+      top: 0;
+      left: 0;
+      min-width: 0;
+      padding: 8px 0;
+      border: 0;
+      color: #888888;
+      background: transparent;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .back-button:hover,
+    .back-button:focus-visible {
+      color: #B8860B;
+    }
+
+    .recording-card {
+      display: grid;
+      gap: 24px;
+      text-align: center;
+    }
+
+    .identity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      text-align: left;
+    }
+
+    .identity-item {
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      background: #171717;
+    }
+
+    .identity-value {
+      margin-top: 6px;
+      font-size: 17px;
+      font-weight: 700;
       overflow-wrap: anywhere;
     }
 
@@ -59,41 +178,35 @@
       justify-content: center;
       gap: 12px;
       flex-wrap: wrap;
-      margin: 28px 0;
     }
 
-    button {
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
+    #startButton,
+    #stopButton {
+      min-width: 220px;
+      padding: 18px 28px;
       font-size: 20px;
       font-weight: 700;
-      padding: 18px 28px;
-      min-width: 190px;
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.55;
     }
 
     #startButton {
-      background: #0b5ed7;
+      border-color: #B8860B;
+      background: #B8860B;
       color: #ffffff;
-      font-size: 26px;
-      padding: 24px 34px;
-      min-width: 280px;
+    }
+
+    #startButton:hover:not(:disabled),
+    #startButton:focus-visible {
+      background: #9f7409;
     }
 
     #stopButton {
-      background: #bb2d3b;
-      color: #ffffff;
+      border-color: #5c1e24;
+      background: #3a1519;
     }
 
     .status-grid {
       display: grid;
       gap: 12px;
-      margin-top: 24px;
     }
 
     .status-row {
@@ -101,28 +214,28 @@
       justify-content: space-between;
       gap: 16px;
       padding: 14px 16px;
-      border: 1px solid #e2e7f0;
+      border: 1px solid #2a2a2a;
       border-radius: 8px;
-      background: #fafbfe;
+      background: #171717;
       text-align: left;
     }
 
     .status-row strong {
-      color: #303b4d;
+      color: #ffffff;
     }
 
     .connected {
-      color: #0f5132;
+      color: #B8860B;
       font-weight: 700;
     }
 
     .disconnected {
-      color: #842029;
+      color: #888888;
       font-weight: 700;
     }
 
     .recording {
-      color: #bb2d3b;
+      color: #B8860B;
       font-weight: 700;
     }
 
@@ -132,51 +245,129 @@
 
     #message {
       min-height: 24px;
-      margin-top: 18px;
-      color: #526070;
+      margin: 0;
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 14px;
+      }
+
+      main {
+        padding: 22px;
+      }
+
+      .screen {
+        min-height: 520px;
+      }
+
+      .screen-header {
+        padding-top: 42px;
+      }
+
+      .identity-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .status-row {
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #startButton,
+      #stopButton {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
   <main>
-    <p class="label">Salesperson</p>
-    <div id="salespersonName" class="salesperson">Unknown</div>
-
-    <h1>Audio Recorder</h1>
-
-    <div class="controls">
-      <button id="startButton" type="button">Start Recording</button>
-      <button id="stopButton" type="button" class="hidden">Stop</button>
-    </div>
-
-    <div class="status-grid" aria-live="polite">
-      <div class="status-row">
-        <strong>Connection</strong>
-        <span id="connectionStatus" class="disconnected">Disconnected</span>
+    <section id="storeScreen" class="screen" aria-labelledby="storeHeading">
+      <div class="screen-header">
+        <h1 id="storeHeading">MK Jewels — Select Store</h1>
       </div>
-      <div class="status-row">
-        <strong>Recording</strong>
-        <span id="recordingStatus">Stopped</span>
-      </div>
-    </div>
+      <p id="storeLoading" class="subheading">Loading...</p>
+      <div id="storeList" class="selection-list"></div>
+    </section>
 
-    <div id="message"></div>
+    <section id="salespersonScreen" class="screen hidden" aria-labelledby="salespersonHeading">
+      <div class="screen-header">
+        <button id="backToStoresButton" class="back-button" type="button">← Back</button>
+        <h1 id="salespersonHeading">Select Your Name</h1>
+        <p id="selectedStoreName" class="subheading"></p>
+      </div>
+      <p id="salespersonLoading" class="subheading">Loading...</p>
+      <div id="salespersonList" class="selection-list"></div>
+    </section>
+
+    <section id="recordingScreen" class="screen hidden" aria-labelledby="recordingHeading">
+      <div class="recording-card">
+        <div>
+          <h1 id="recordingHeading">Audio Recorder</h1>
+          <p class="subheading">Live store conversation capture</p>
+        </div>
+
+        <div class="identity-grid">
+          <div class="identity-item">
+            <p class="label">Store</p>
+            <div id="recordingStoreName" class="identity-value">Unknown</div>
+          </div>
+          <div class="identity-item">
+            <p class="label">Salesperson</p>
+            <div id="salespersonName" class="identity-value">Unknown</div>
+          </div>
+          <div class="identity-item">
+            <p class="label">Designation</p>
+            <div id="salespersonDesignation" class="identity-value">Unknown</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="startButton" type="button">Start Recording</button>
+          <button id="stopButton" type="button" class="hidden">Stop</button>
+        </div>
+
+        <div class="status-grid" aria-live="polite">
+          <div class="status-row">
+            <strong>Connection</strong>
+            <span id="connectionStatus" class="disconnected">Disconnected</span>
+          </div>
+          <div class="status-row">
+            <strong>Recording</strong>
+            <span id="recordingStatus">Stopped</span>
+          </div>
+        </div>
+
+        <div id="message"></div>
+      </div>
+    </section>
   </main>
 
   <script>
     const TARGET_SAMPLE_RATE = 16000;
+    const WS_PORT = 8765;
 
-    const params = new URLSearchParams(window.location.search);
-    const salespersonName = (params.get("name") || "Unknown").trim() || "Unknown";
-    const websocketUrl = `ws://${window.location.hostname}:8765?name=${encodeURIComponent(salespersonName)}`;
-
+    const storeScreen = document.getElementById("storeScreen");
+    const salespersonScreen = document.getElementById("salespersonScreen");
+    const recordingScreen = document.getElementById("recordingScreen");
+    const storeLoading = document.getElementById("storeLoading");
+    const storeList = document.getElementById("storeList");
+    const salespersonLoading = document.getElementById("salespersonLoading");
+    const salespersonList = document.getElementById("salespersonList");
+    const selectedStoreNameElement = document.getElementById("selectedStoreName");
+    const backToStoresButton = document.getElementById("backToStoresButton");
+    const recordingStoreNameElement = document.getElementById("recordingStoreName");
     const salespersonNameElement = document.getElementById("salespersonName");
+    const salespersonDesignationElement = document.getElementById("salespersonDesignation");
     const startButton = document.getElementById("startButton");
     const stopButton = document.getElementById("stopButton");
     const connectionStatus = document.getElementById("connectionStatus");
     const recordingStatus = document.getElementById("recordingStatus");
     const message = document.getElementById("message");
 
+    let selectedStore = null;
+    let selectedSalesperson = null;
     let audioContext = null;
     let mediaStream = null;
     let sourceNode = null;
@@ -189,8 +380,10 @@
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
 
-    salespersonNameElement.textContent = salespersonName;
-
+    backToStoresButton.addEventListener("click", () => {
+      selectedSalesperson = null;
+      showScreen(storeScreen);
+    });
     startButton.addEventListener("click", startRecording);
     stopButton.addEventListener("click", () => {
       userInitiatedStop = true;
@@ -198,7 +391,115 @@
     });
     window.addEventListener("beforeunload", stopRecording);
 
+    loadStores();
+
+    async function loadStores() {
+      storeLoading.textContent = "Loading...";
+      storeLoading.classList.remove("hidden");
+      storeList.innerHTML = "";
+
+      try {
+        const stores = await fetchJson("/api/stores");
+        storeLoading.classList.add("hidden");
+
+        if (!stores.length) {
+          storeLoading.textContent = "No stores found.";
+          storeLoading.classList.remove("hidden");
+          return;
+        }
+
+        stores.forEach((store) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "selection-button";
+          button.innerHTML = `<span class="store-name">${escapeHtml(store.name)}</span>`;
+          button.addEventListener("click", () => selectStore(store));
+          storeList.appendChild(button);
+        });
+      } catch (error) {
+        storeLoading.textContent = `Unable to load stores: ${error.message}`;
+      }
+    }
+
+    async function selectStore(store) {
+      selectedStore = store;
+      selectedSalesperson = null;
+      selectedStoreNameElement.textContent = store.name;
+      salespersonList.innerHTML = "";
+      salespersonLoading.textContent = "Loading...";
+      salespersonLoading.classList.remove("hidden");
+      showScreen(salespersonScreen);
+
+      try {
+        const salespersons = await fetchJson(`/api/stores/${encodeURIComponent(store.id)}/salespersons`);
+        salespersonLoading.classList.add("hidden");
+
+        if (!salespersons.length) {
+          salespersonLoading.textContent = "No salespersons found.";
+          salespersonLoading.classList.remove("hidden");
+          return;
+        }
+
+        salespersons.forEach((salesperson) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "selection-button";
+          button.innerHTML = `
+            <span class="salesperson-button-name">${escapeHtml(salesperson.name)}</span>
+            <span class="salesperson-button-designation">${escapeHtml(salesperson.designation)}</span>
+          `;
+          button.addEventListener("click", () => selectSalesperson(salesperson));
+          salespersonList.appendChild(button);
+        });
+      } catch (error) {
+        salespersonLoading.textContent = `Unable to load salespersons: ${error.message}`;
+      }
+    }
+
+    function selectSalesperson(salesperson) {
+      selectedSalesperson = salesperson;
+      recordingStoreNameElement.textContent = selectedStore.name;
+      salespersonNameElement.textContent = salesperson.name;
+      salespersonDesignationElement.textContent = salesperson.designation;
+      message.textContent = "";
+      showScreen(recordingScreen);
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    function showScreen(screen) {
+      [storeScreen, salespersonScreen, recordingScreen].forEach((element) => {
+        element.classList.toggle("hidden", element !== screen);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#039;"
+      }[character]));
+    }
+
+    function buildWebSocketUrl() {
+      const salespersonName = selectedSalesperson.name.trim() || "Unknown";
+      return `ws://${window.location.hostname}:${WS_PORT}?name=${encodeURIComponent(salespersonName)}&salesperson_id=${selectedSalesperson.id}&store_id=${selectedStore.id}`;
+    }
+
     async function startRecording() {
+      if (!selectedStore || !selectedSalesperson) {
+        message.textContent = "Select a store and salesperson before recording.";
+        return;
+      }
+
       startButton.disabled = true;
       userInitiatedStop = false;
       reconnectAttempts = 0;
@@ -222,7 +523,7 @@
     }
 
     function connectWebSocket() {
-      websocket = new WebSocket(websocketUrl);
+      websocket = new WebSocket(buildWebSocketUrl());
       websocket.binaryType = "arraybuffer";
 
       websocket.addEventListener("open", () => {
