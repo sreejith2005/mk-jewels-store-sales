@@ -41,6 +41,7 @@ class Config:
     )
     DB_PATH = os.getenv("DB_PATH", "sessions.db")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+    KNOWLEDGE_BASE_PATH = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge/")
     REPORT_HOUR = int(os.getenv("REPORT_HOUR", "21"))
     WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
     WS_PORT = int(os.getenv("WS_PORT", "8765"))

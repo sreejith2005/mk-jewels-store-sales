@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
+import bcrypt
+
 from config import Config
 from core.exceptions import DatabaseError
 from core.logger import get_logger
@@ -17,7 +19,9 @@ class Database:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or Config.DB_PATH
         self._lock = threading.Lock()
-        self._backend = "postgres" if Config.POSTGRES_URL.strip() else "sqlite"
+        self._backend = (
+            "postgres" if db_path is None and Config.POSTGRES_URL.strip() else "sqlite"
+        )
         self._pool = None
         logger.info("Database backend: %s", self._backend)
 
@@ -74,9 +78,21 @@ class Database:
                                 store_id INTEGER NOT NULL REFERENCES stores(id),
                                 name TEXT NOT NULL,
                                 designation TEXT NOT NULL,
+                                pin_hash TEXT DEFAULT NULL,
                                 is_active INTEGER NOT NULL DEFAULT 1,
                                 created_at TEXT
                             )
+                            """
+                        )
+                        cursor.execute(
+                            """
+                            DO $$
+                            BEGIN
+                                ALTER TABLE salespersons
+                                ADD COLUMN pin_hash TEXT DEFAULT NULL;
+                            EXCEPTION WHEN duplicate_column THEN
+                                NULL;
+                            END $$;
                             """
                         )
                         cursor.execute(
@@ -196,11 +212,18 @@ class Database:
                     store_id INTEGER NOT NULL REFERENCES stores(id),
                     name TEXT NOT NULL,
                     designation TEXT NOT NULL,
+                    pin_hash TEXT DEFAULT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT
                 )
                 """
             )
+            try:
+                self._connection.execute(
+                    "ALTER TABLE salespersons ADD COLUMN pin_hash TEXT DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -361,6 +384,74 @@ class Database:
 
         return [dict(row) for row in rows]
 
+    def get_salespersons_with_pin_status(self, store_id: int) -> list[dict]:
+        """Fetch active salespersons with a boolean PIN status, never the hash."""
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT
+                                id,
+                                store_id,
+                                name,
+                                designation,
+                                is_active,
+                                created_at,
+                                pin_hash IS NOT NULL AS pin_set
+                            FROM salespersons
+                            WHERE store_id = %s
+                                AND is_active = 1
+                            ORDER BY
+                                CASE designation
+                                    WHEN 'Sales Manager' THEN 1
+                                    WHEN 'Senior Sales Executive' THEN 2
+                                    WHEN 'Sales Executive' THEN 3
+                                    WHEN 'Sales Assistant' THEN 4
+                                    ELSE 5
+                                END,
+                                name ASC
+                            """,
+                            (store_id,),
+                        )
+                        rows = self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        return [{**row, "pin_set": bool(row["pin_set"])} for row in rows]
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch salespersons PIN status.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT
+                    id,
+                    store_id,
+                    name,
+                    designation,
+                    is_active,
+                    created_at,
+                    pin_hash IS NOT NULL AS pin_set
+                FROM salespersons
+                WHERE store_id = ?
+                    AND is_active = 1
+                ORDER BY
+                    CASE designation
+                        WHEN 'Sales Manager' THEN 1
+                        WHEN 'Senior Sales Executive' THEN 2
+                        WHEN 'Sales Executive' THEN 3
+                        WHEN 'Sales Assistant' THEN 4
+                        ELSE 5
+                    END,
+                    name ASC
+                """,
+                (store_id,),
+            ).fetchall()
+
+        return [{**dict(row), "pin_set": bool(row["pin_set"])} for row in rows]
+
     def get_salesperson(self, salesperson_id: int) -> dict | None:
         with self._lock:
             if self._backend == "postgres":
@@ -393,6 +484,121 @@ class Database:
             ).fetchone()
 
         return dict(row) if row else None
+
+    def salesperson_has_pin(self, salesperson_id: int) -> bool | None:
+        """Return PIN setup status for an active salesperson, or None if missing."""
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT pin_hash IS NOT NULL AS pin_set
+                            FROM salespersons
+                            WHERE id = %s
+                                AND is_active = 1
+                            """,
+                            (salesperson_id,),
+                        )
+                        row = cursor.fetchone()
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch salesperson PIN status.") from exc
+                finally:
+                    self._pool.putconn(connection)
+            else:
+                row = self._connection.execute(
+                    """
+                    SELECT pin_hash IS NOT NULL AS pin_set
+                    FROM salespersons
+                    WHERE id = ?
+                        AND is_active = 1
+                    """,
+                    (salesperson_id,),
+                ).fetchone()
+
+        if row is None:
+            return None
+
+        return bool(row[0])
+
+    def set_salesperson_pin(self, salesperson_id: int, pin: str) -> bool:
+        """Hash and store a salesperson PIN."""
+        pin_hash = bcrypt.hashpw(pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            UPDATE salespersons
+                            SET pin_hash = %s
+                            WHERE id = %s
+                            """,
+                            (pin_hash, salesperson_id),
+                        )
+                        updated_count = cursor.rowcount
+                    connection.commit()
+                    return updated_count > 0
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to set salesperson PIN.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            cursor = self._connection.execute(
+                """
+                UPDATE salespersons
+                SET pin_hash = ?
+                WHERE id = ?
+                """,
+                (pin_hash, salesperson_id),
+            )
+            self._connection.commit()
+
+        return cursor.rowcount > 0
+
+    def verify_salesperson_pin(self, salesperson_id: int, pin: str) -> bool:
+        """Return True when the provided PIN matches the stored bcrypt hash."""
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT pin_hash
+                            FROM salespersons
+                            WHERE id = %s
+                                AND is_active = 1
+                            """,
+                            (salesperson_id,),
+                        )
+                        row = cursor.fetchone()
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to verify salesperson PIN.") from exc
+                finally:
+                    self._pool.putconn(connection)
+            else:
+                row = self._connection.execute(
+                    """
+                    SELECT pin_hash
+                    FROM salespersons
+                    WHERE id = ?
+                        AND is_active = 1
+                    """,
+                    (salesperson_id,),
+                ).fetchone()
+
+        pin_hash = row[0] if row else None
+        if not pin_hash:
+            return False
+
+        return bcrypt.checkpw(pin.encode("utf-8"), pin_hash.encode("utf-8"))
 
     def get_store_name(self, store_id: int | None) -> str | None:
         if store_id is None:
@@ -670,6 +876,47 @@ class Database:
             ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a session and its transcript events atomically."""
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM events WHERE session_id = %s",
+                            (session_id,),
+                        )
+                        cursor.execute(
+                            "DELETE FROM sessions WHERE id = %s",
+                            (session_id,),
+                        )
+                        deleted = cursor.rowcount > 0
+                    connection.commit()
+                    return deleted
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to delete session.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            try:
+                self._connection.execute("BEGIN")
+                self._connection.execute(
+                    "DELETE FROM events WHERE session_id = ?",
+                    (session_id,),
+                )
+                cursor = self._connection.execute(
+                    "DELETE FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+                deleted = cursor.rowcount > 0
+                self._connection.commit()
+                return deleted
+            except Exception as exc:
+                self._connection.rollback()
+                raise DatabaseError("Failed to delete session.") from exc
 
     def log_alert(
         self,

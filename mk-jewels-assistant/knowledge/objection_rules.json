@@ -1,0 +1,229 @@
+{
+  "making_charges_high": {
+    "label": "Making charges are high",
+    "customer_signals": [
+      "making charges are high",
+      "making charge is high",
+      "making zyada hai",
+      "making charges zyada hain",
+      "aapki making charges zyada hain",
+      "making itni zyada kyun hai",
+      "making charges badh gaye",
+      "last time making kam thi",
+      "karigar ne making badha di",
+      "expensive hai",
+      "bahut expensive hai",
+      "mehnga hai",
+      "zyada mehnga hai"
+    ],
+    "recommended_responses": [
+      "Acknowledge calmly first and avoid sounding defensive.",
+      "Ask what the customer is comparing the making charges with: earlier purchase, another jeweller, or online.",
+      "Explain that jewellery price differences come from design, craftsmanship, process, finishing, comfort, and accountability, not only weight.",
+      "Explain that making charges include gold consumed or lost during melting, casting, cutting, filing, stone setting, polishing, hallmarking, certification, and quality control.",
+      "Explain that wastage is charged as a percentage, so the same wastage becomes costlier when the gold price rises.",
+      "Reframe the piece as handcrafted art, longevity, comfort, and pride before discussing any adjustment.",
+      "If offering relief, use language like special expert consideration or adjustment, not discount positioning."
+    ],
+    "forbidden_responses": [
+      "Do not defend immediately or argue with the customer.",
+      "Do not start with discount, best rate, last price, or special price language.",
+      "Do not say making is only labour charge.",
+      "Do not imply the karigar randomly increased charges when the wastage percentage is unchanged.",
+      "Do not skip the value explanation and jump straight to price reduction."
+    ],
+    "alert_priority": "high"
+  },
+  "price_value_concern": {
+    "label": "General price or value concern",
+    "customer_signals": [
+      "price",
+      "costs more",
+      "higher making charges",
+      "too costly",
+      "rate zyada hai",
+      "price zyada hai",
+      "budget",
+      "affordable",
+      "discount milega",
+      "best rate",
+      "last price"
+    ],
+    "recommended_responses": [
+      "Before talking about price, ask what matters most to the customer in the piece.",
+      "Build value through beauty, trust, emotion, expertise, experience, and future security.",
+      "Use styling and emotional lines: explain how the piece suits the customer, occasion, lifestyle, or family memory.",
+      "Use proof over promise: certificates, store legacy, BIS HUID, certified diamonds, buyback, exchange, quality checks, and long-term support.",
+      "Stay silent after quoting the price instead of over-explaining."
+    ],
+    "forbidden_responses": [
+      "Do not begin the conversation with gold rate, making charges, or discount.",
+      "Do not say many people buy this as generic social proof.",
+      "Do not ask bluntly whether the customer wants to buy.",
+      "Do not chase, argue, or push."
+    ],
+    "alert_priority": "medium"
+  },
+  "diamond_buyback_deduction": {
+    "label": "Diamond buyback deduction or valuation concern",
+    "customer_signals": [
+      "diamond buyback",
+      "diamond exchange",
+      "10% deduction",
+      "why deduct 10",
+      "we cut 10",
+      "purchased it for 50000 per carat",
+      "bought it for 50000 per carat",
+      "valuing it at 20000 per carat",
+      "itna kam value",
+      "loss ho raha hai",
+      "jewellery cheaper ho gayi",
+      "sirf itna milega",
+      "bought it from mk jewels"
+    ],
+    "recommended_responses": [
+      "Welcome the customer, receive jewellery carefully, and explain that every component is calculated separately.",
+      "Verify original invoice and authenticity certificate; if unavailable, explain that valuation can still happen but documentation is required before payment.",
+      "Explain gross weight, diamond weight, non-gold components, and net gold weight before discussing policy.",
+      "Explain diamond quality and current market value before explaining the 10% diamond buyback adjustment.",
+      "Say the gold portion is calculated separately based on today's live gold rate and net gold weight.",
+      "If the customer compares purchase and buyback value, first compare diamond quality, then explain that buying and buyback are different transactions, then explain the policy.",
+      "Use current market value, net gold weight, transparent calculation, every component is valued separately, fair valuation, and today's live gold rate."
+    ],
+    "forbidden_responses": [
+      "Do not start by discussing deductions.",
+      "Do not say we deduct 10% or we cut 10%.",
+      "Do not say loss, depreciation, your jewellery has become cheaper, or we only give this much.",
+      "Do not guess the valuation or commit to an amount before technical assessment.",
+      "Do not compare with competitors, debate, or say this is our rate, take it or leave it."
+    ],
+    "alert_priority": "high"
+  },
+  "diamond_valuation_without_invoice": {
+    "label": "Diamond valuation without invoice or immediate valuation",
+    "customer_signals": [
+      "no invoice",
+      "without bill",
+      "bill nahi hai",
+      "invoice nahi hai",
+      "tell me immediately",
+      "need it today",
+      "aaj hi batao",
+      "immediate value",
+      "factory bhejna padega",
+      "don't want to leave the jewellery",
+      "jewellery nahi chhodna"
+    ],
+    "recommended_responses": [
+      "Say the invoice helps identify specifications faster, but evaluation can still be done without it.",
+      "Explain that diamond jewellery valuation verifies gold purity, net gold weight, diamond weight, diamond quality, craftsmanship, and current market value.",
+      "Set an expectation that complete evaluation generally takes 24-48 hours because accuracy is preferred over a quick estimate.",
+      "If the customer needs an answer today, offer only a broad indicative range after visual inspection.",
+      "Confirm final valuation only after complete technical assessment."
+    ],
+    "forbidden_responses": [
+      "Do not begin by asking do you have the bill.",
+      "Do not say factory bhejna padega or factory will decide.",
+      "Do not say it should be around a specific amount before assessment.",
+      "Do not guess, argue, or commit to a final value immediately."
+    ],
+    "alert_priority": "high"
+  },
+  "old_gold_exchange": {
+    "label": "Old gold sale or exchange",
+    "customer_signals": [
+      "old gold",
+      "sell old gold",
+      "exchange old gold",
+      "purana gold",
+      "sona exchange",
+      "melting",
+      "melt karna padega",
+      "karatometer",
+      "purity test",
+      "non-gold elements",
+      "stones remove",
+      "final value"
+    ],
+    "recommended_responses": [
+      "Explain that MK Jewels purchases old gold at the same standard gold buying rate used for bullion-market purchase.",
+      "Explain that old gold becomes raw material and is refined and reused, so scientific purity testing is required.",
+      "Inspect and remove meenakari, stones, pearls, enamel, adhesives, and other non-gold elements before weighing.",
+      "Explain that final calculation is based on post-melting weight and karatometer purity.",
+      "Take written consent before melting and explain the process is irreversible and final purity may vary.",
+      "Explain that 1% is deducted as a standard refining charge, not profit or margin.",
+      "Offer credit note, exchange against new jewellery, or bank transfer where applicable, excluding coins or bullion."
+    ],
+    "forbidden_responses": [
+      "Do not commit any estimate as final without melting.",
+      "Do not accept gold with non-removable stones unless clearly agreed by the customer.",
+      "Do not hide that non-gold elements are excluded from gold-rate valuation.",
+      "Do not skip melting consent or final transaction signatures."
+    ],
+    "alert_priority": "high"
+  },
+  "certification_authenticity": {
+    "label": "Certification and authenticity question",
+    "customer_signals": [
+      "certificate",
+      "certified",
+      "igi",
+      "gia",
+      "bis",
+      "huid",
+      "hallmark",
+      "authentic",
+      "natural diamond",
+      "qr code",
+      "certificate number",
+      "diamond specifications",
+      "proof of authenticity"
+    ],
+    "recommended_responses": [
+      "Explain that MK Jewels jewellery is BIS HUID hallmarked and diamonds are certified.",
+      "For IGI certified natural diamond bangles, explain that the certificate can be scanned through its QR code and verified online.",
+      "Explain that the certificate mentions gold weight and exact diamond specifications including colour and clarity.",
+      "Explain that the same certificate number is engraved on the bangle as proof of authenticity.",
+      "Position authenticity as documentation, transparency, and luxury together."
+    ],
+    "forbidden_responses": [
+      "Do not ask the customer to trust blindly when verification is available.",
+      "Do not make unsupported certification claims beyond the certificate.",
+      "Do not ignore certificate, QR code, or engraved certificate-number questions."
+    ],
+    "alert_priority": "high"
+  },
+  "occasion_styling_discovery": {
+    "label": "Missed occasion, styling, or discovery opportunity",
+    "customer_signals": [
+      "for myself",
+      "for gifting",
+      "gift",
+      "wedding",
+      "bridal",
+      "anniversary",
+      "birthday",
+      "engagement",
+      "daily wear",
+      "function",
+      "outfit",
+      "saree",
+      "lehenga",
+      "what will suit me",
+      "confused"
+    ],
+    "recommended_responses": [
+      "Ask who the jewellery is for and whether it is for a special occasion or everyday elegance.",
+      "Guide like a consultant, not a stock-shower.",
+      "Discuss face shape, neckline, outfit, occasion, and lifestyle.",
+      "Use soft, honest compliments and mirror-moment lines when the customer tries the jewellery.",
+      "Translate features into feelings: confidence, elegance, celebration, status, memories, and peace of mind."
+    ],
+    "forbidden_responses": [
+      "Do not only show stock without discovery.",
+      "Do not use loud, fake, or overexcited compliments.",
+      "Do not reduce an emotional occasion purchase to only gold rate, making charge, or discount."
+    ],
+    "alert_priority": "medium"
+  }
+}

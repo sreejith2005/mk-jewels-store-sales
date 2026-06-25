@@ -42,10 +42,12 @@ def main() -> None:
     try:
         seeded_stores = _seed_stores(db)
         seeded_salespersons = _seed_bandra_salespersons(db)
+        _seed_default_bandra_pins(db)
     finally:
         db.close()
 
     print(f"Seeded {seeded_stores} stores, {seeded_salespersons} salespersons")
+    print("Default PIN 0000 set for all salespersons. Change before production.")
 
 
 def _seed_stores(db: Database) -> int:
@@ -186,6 +188,49 @@ def _seed_bandra_salespersons(db: Database) -> int:
             cursor.close()
 
     return seeded_count
+
+
+def _seed_default_bandra_pins(db: Database) -> int:
+    salesperson_ids = _get_bandra_salesperson_ids_without_pin(db)
+
+    for salesperson_id in salesperson_ids:
+        db.set_salesperson_pin(salesperson_id, "0000")
+
+    return len(salesperson_ids)
+
+
+def _get_bandra_salesperson_ids_without_pin(db: Database) -> list[int]:
+    with db._lock:
+        if db._backend == "postgres":
+            connection = db._pool.getconn()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT salespersons.id
+                        FROM salespersons
+                        INNER JOIN stores ON stores.id = salespersons.store_id
+                        WHERE stores.slug = %s
+                            AND salespersons.pin_hash IS NULL
+                        """,
+                        ("bandra",),
+                    )
+                    return [row[0] for row in cursor.fetchall()]
+            finally:
+                db._pool.putconn(connection)
+
+        rows = db._connection.execute(
+            """
+            SELECT salespersons.id
+            FROM salespersons
+            INNER JOIN stores ON stores.id = salespersons.store_id
+            WHERE stores.slug = ?
+                AND salespersons.pin_hash IS NULL
+            """,
+            ("bandra",),
+        ).fetchall()
+
+    return [row["id"] for row in rows]
 
 
 if __name__ == "__main__":

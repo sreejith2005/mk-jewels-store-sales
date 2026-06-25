@@ -6,8 +6,10 @@ scipy
 openai
 flask
 flask-cors
+Pillow
 requests
 websockets>=16.0
+bcrypt
 psycopg2-binary
 apscheduler
 gunicorn
