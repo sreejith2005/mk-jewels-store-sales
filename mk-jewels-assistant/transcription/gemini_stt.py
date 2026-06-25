@@ -12,6 +12,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.exceptions import TriageError
 from core.logger import get_logger
 from core.schemas import validate_event
+from triage.qwen3_triage import (
+    CRITICAL_ALERT_CALIBRATION_RULES,
+    build_kb_context,
+)
 
 try:
     from config import Config
@@ -63,12 +67,24 @@ SYSTEM_PROMPT = (
 
 USER_PROMPT = (
     "Transcribe this audio exactly as spoken, preserving all languages. "
+    "After transcription, apply this knowledge-base context while classifying:\n"
+    "--- MK JEWELS KNOWLEDGE BASE (relevant to this conversation) ---\n"
+    "{kb_context}\n"
+    "--- END KNOWLEDGE BASE ---\n\n"
+    "{calibration_rules}\n\n"
     "Then output ONLY a valid JSON object with these fields and no other text: "
     "transcript (string), objection_detected (bool), price_concern (bool), "
     "certification_question (bool), upsell_miss (bool), knowledge_gap (bool), "
     "intent_signal (bool), alert_priority (string, one of: none / low / medium / high), "
     "reasoning (string, max 20 words explaining the highest-priority signal detected or 'no signals detected')."
 )
+
+
+def _build_gemini_user_prompt(transcript_text: str = "") -> str:
+    return USER_PROMPT.format(
+        kb_context=build_kb_context(transcript_text),
+        calibration_rules=CRITICAL_ALERT_CALIBRATION_RULES,
+    )
 
 
 def _triage_openrouter(transcript_text: str, salesperson_name: str) -> dict:
@@ -82,6 +98,10 @@ def _triage_openrouter(transcript_text: str, salesperson_name: str) -> dict:
     prompt = (
         f"Salesperson: {salesperson_name}\n"
         f"Transcript:\n{transcript_text}\n\n"
+        "--- MK JEWELS KNOWLEDGE BASE (relevant to this conversation) ---\n"
+        f"{build_kb_context(transcript_text)}\n"
+        "--- END KNOWLEDGE BASE ---\n\n"
+        f"{CRITICAL_ALERT_CALIBRATION_RULES}\n\n"
         "Classify this jewelry sales conversation. Output ONLY a valid JSON object "
         "with these fields and no other text: objection_detected (bool), "
         "price_concern (bool), certification_question (bool), upsell_miss (bool), "
@@ -154,7 +174,7 @@ def transcribe_and_triage(
             model='gemini-2.5-flash',
             contents=[
                 types.Part.from_bytes(data=wav_bytes, mime_type='audio/wav'),
-                USER_PROMPT
+                _build_gemini_user_prompt()
             ],
             config=_gemini_config(),
         )
@@ -177,7 +197,7 @@ def transcribe_and_triage(
                 model='gemini-2.5-flash',
                 contents=[
                     types.Part.from_bytes(data=wav_bytes, mime_type='audio/wav'),
-                    USER_PROMPT + "\n\n" + retry_prompt
+                    _build_gemini_user_prompt(transcript_text) + "\n\n" + retry_prompt
                 ],
                 config=_gemini_config(),
             )

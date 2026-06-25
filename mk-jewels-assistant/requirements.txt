@@ -6,11 +6,15 @@ scipy
 openai
 flask
 flask-cors
+Pillow
 requests
 websockets>=16.0
+bcrypt
 psycopg2-binary
 apscheduler
 gunicorn
 pytest
 transformers
 torch
+# Optional: diarization (DIARIZATION_ENABLED=true in .env)
+pyannote.audio>=3.1.0

@@ -3,13 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#C9A96E">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="MK Jewels">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <title>MK Jewels Recorder</title>
   <style>
+    @import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700&display=swap");
+
     :root {
       color-scheme: light;
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f6f7fb;
-      color: #172033;
+      --gold: #C9A96E;
+      --gold-light: #E2C98A;
+      --gold-dark: #A07840;
+      --surface-light: #F7F4EF;
+      --surface-card: #FFFFFF;
+      --text-primary: #1A1614;
+      --text-secondary: #6B6560;
+      --success: #2D7A4F;
+      --warning: #C17B2A;
+      --danger: #C0392B;
+      --border-gold: rgba(201, 169, 110, 0.28);
+      --shadow-soft: 0 18px 50px rgba(42, 31, 20, 0.11);
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background: var(--surface-light);
+      color: var(--text-primary);
     }
 
     * {
@@ -19,38 +40,426 @@
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 0;
+      background:
+        radial-gradient(circle at top, rgba(201, 169, 110, 0.22), transparent 34rem),
+        linear-gradient(180deg, #fffaf0 0%, var(--surface-light) 44%, #efe5d7 100%);
     }
 
     main {
-      width: min(720px, 100%);
-      background: #ffffff;
-      border: 1px solid #d9deea;
-      border-radius: 8px;
-      padding: 32px;
-      box-shadow: 0 12px 40px rgba(23, 32, 51, 0.08);
-      text-align: center;
+      width: min(480px, 100%);
+      min-height: 100vh;
+      background: rgba(247, 244, 239, 0.92);
+      padding: 24px 20px 28px;
     }
 
     h1 {
-      margin: 0 0 10px;
-      font-size: clamp(32px, 6vw, 54px);
-      line-height: 1.05;
+      margin: 0;
+      font-family: "Barlow Condensed", "Inter", sans-serif;
+      font-size: clamp(36px, 11vw, 48px);
+      font-weight: 700;
+      line-height: 0.98;
+      letter-spacing: 0;
+      text-align: center;
+      text-transform: uppercase;
+      color: var(--text-primary);
+    }
+
+    #storeHeading,
+    #salespersonHeading,
+    #recordingHeading {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .visual-heading {
+      position: static;
+      width: auto;
+      height: auto;
+      margin: 0;
+      overflow: visible;
+      clip: auto;
+      white-space: normal;
+    }
+
+    .subheading,
+    .label,
+    #message {
+      color: var(--text-secondary);
+    }
+
+    .subheading {
+      margin: 10px auto 28px;
+      max-width: 320px;
+      font-size: 15px;
+      line-height: 1.5;
+      text-align: center;
     }
 
     .label {
       margin: 0;
-      color: #526070;
-      font-size: 18px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
     }
 
-    .salesperson {
-      margin: 18px 0 28px;
-      font-size: clamp(28px, 5vw, 44px);
+    .screen {
+      min-height: calc(100vh - 52px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 22px;
+      opacity: 1;
+      transform: translateY(0);
+      transition: opacity 200ms ease, transform 200ms ease;
+    }
+
+    .screen-header {
+      position: relative;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    .brand-logo {
+      display: block;
+      width: min(244px, 72vw);
+      height: auto;
+      margin: 0 auto 34px;
+      mix-blend-mode: multiply;
+    }
+
+    .header-overline {
+      margin: 0 0 10px;
+      color: var(--gold-dark);
+      font-size: 12px;
       font-weight: 700;
-      color: #0f5132;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .selection-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .salesperson-form,
+    .pin-form {
+      display: grid;
+      gap: 16px;
+    }
+
+    .salesperson-select {
+      width: 100%;
+      min-height: 58px;
+      border: 1px solid rgba(160, 120, 64, 0.24);
+      border-radius: 12px;
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      outline: none;
+      padding: 0 44px 0 16px;
+      box-shadow: 0 12px 28px rgba(42, 31, 20, 0.06);
+    }
+
+    .salesperson-select:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 0 4px rgba(201, 169, 110, 0.13);
+    }
+
+    .pin-step {
+      display: grid;
+      gap: 14px;
+      margin-top: 4px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(160, 120, 64, 0.18);
+      overflow: hidden;
+      max-height: 320px;
+      opacity: 1;
+      transform: translateY(0);
+      transition: max-height 220ms ease, opacity 180ms ease, transform 180ms ease;
+    }
+
+    .pin-step.setup-mode {
+      max-height: 560px;
+    }
+
+    .pin-step.hidden {
+      display: grid;
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(-8px);
+      padding-top: 0;
+      border-top: 0;
+      pointer-events: none;
+    }
+
+    .step-heading {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .pin-setup-banner,
+    .remembered-auth {
+      padding: 10px 12px;
+      border: 1px solid var(--border-gold);
+      border-radius: 12px;
+      background: rgba(201, 169, 110, 0.11);
+      color: var(--gold-dark);
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .remembered-auth {
+      display: grid;
+      gap: 10px;
+      margin-top: -2px;
+    }
+
+    .remembered-auth p {
+      margin: 0;
+    }
+
+    .remembered-auth-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .remembered-auth .primary-button {
+      width: auto;
+      min-width: 132px;
+      min-height: 42px;
+      padding: 0 18px;
+    }
+
+    .text-link {
+      min-height: 0;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: underline;
+      box-shadow: none;
+    }
+
+    .text-link:hover,
+    .text-link:focus-visible {
+      color: var(--gold-dark);
+      box-shadow: none;
+      transform: none;
+    }
+
+    .pin-input-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .pin-digit {
+      width: 100%;
+      max-width: 52px;
+      min-height: 58px;
+      border: 1px solid rgba(160, 120, 64, 0.24);
+      border-radius: 12px;
+      background: var(--surface-card);
+      color: var(--text-primary);
+      font: inherit;
+      font-size: 26px;
+      font-weight: 700;
+      text-align: center;
+      outline: none;
+      box-shadow: 0 12px 28px rgba(42, 31, 20, 0.06);
+    }
+
+    .pin-digit:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 0 4px rgba(201, 169, 110, 0.13);
+    }
+
+    .pin-input-row.shake {
+      animation: pinShake 260ms ease;
+    }
+
+    .pin-error {
+      min-height: 20px;
+      margin: 0;
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .forgot-pin {
+      margin: -4px 0 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .sign-out-link {
+      position: absolute;
+      top: 0;
+      right: 0;
+      min-height: 0;
+      border: 0;
+      padding: 8px 0;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: underline;
+      box-shadow: none;
+    }
+
+    .sign-out-link:hover,
+    .sign-out-link:focus-visible {
+      color: var(--gold-dark);
+      box-shadow: none;
+      transform: none;
+    }
+
+    .primary-button {
+      width: 100%;
+      min-height: 56px;
+      border-color: rgba(201, 169, 110, 0.42);
+      background: linear-gradient(180deg, #F7E2A6 0%, var(--gold) 100%);
+      color: #21170f;
+      font-weight: 700;
+    }
+
+    .primary-button:hover,
+    .primary-button:focus-visible {
+      background: linear-gradient(180deg, #FFE9AD 0%, #D7B777 100%);
+    }
+
+    button {
+      min-height: 48px;
+      border: 1px solid rgba(160, 120, 64, 0.18);
+      border-radius: 12px;
+      cursor: pointer;
+      font: inherit;
+      color: var(--text-primary);
+      background: var(--surface-card);
+      transition: transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+    }
+
+    button:hover:not(:disabled),
+    button:focus-visible {
+      border-color: var(--gold);
+      color: var(--text-primary);
+      outline: none;
+      box-shadow: 0 0 0 4px rgba(201, 169, 110, 0.13);
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .selection-button {
+      width: 100%;
+      min-height: 78px;
+      padding: 18px 18px;
+      text-align: left;
+      border-left: 4px solid transparent;
+      box-shadow: 0 12px 28px rgba(42, 31, 20, 0.06);
+    }
+
+    .selection-button:hover,
+    .selection-button:focus-visible {
+      border-left-color: var(--gold);
+      background: #fffaf2;
+    }
+
+    .store-name,
+    .salesperson-button-name {
+      display: block;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .salesperson-button-designation {
+      display: block;
+      margin-top: 5px;
+      color: var(--text-secondary);
+      font-size: 15px;
+    }
+
+    .back-button {
+      position: absolute;
+      top: 0;
+      left: 0;
+      min-width: 0;
+      min-height: 40px;
+      padding: 8px 0;
+      border: 0;
+      color: var(--text-secondary);
+      background: transparent;
+      font-size: 15px;
+      font-weight: 600;
+      box-shadow: none;
+      font-size: 0;
+    }
+
+    .back-button::after {
+      content: "< Back";
+      font-size: 15px;
+    }
+
+    .back-button:hover,
+    .back-button:focus-visible {
+      color: var(--gold-dark);
+      box-shadow: none;
+      transform: none;
+    }
+
+    .recording-card {
+      display: grid;
+      gap: 22px;
+      text-align: center;
+    }
+
+    .identity-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      text-align: left;
+    }
+
+    .identity-item {
+      min-width: 0;
+      padding: 15px 16px;
+      border: 1px solid rgba(160, 120, 64, 0.16);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 10px 24px rgba(42, 31, 20, 0.05);
+    }
+
+    .identity-value {
+      margin-top: 6px;
+      font-size: 16px;
+      font-weight: 700;
       overflow-wrap: anywhere;
     }
 
@@ -59,41 +468,70 @@
       justify-content: center;
       gap: 12px;
       flex-wrap: wrap;
-      margin: 28px 0;
+      padding: 12px 0 4px;
     }
 
-    button {
-      border: 0;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 20px;
+    #startButton,
+    #stopButton {
+      position: relative;
+      width: 176px;
+      height: 176px;
+      min-width: 176px;
+      min-height: 176px;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border-radius: 999px;
+      border-width: 8px;
+      padding: 20px;
+      font-size: 16px;
       font-weight: 700;
-      padding: 18px 28px;
-      min-width: 190px;
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.55;
+      box-shadow: 0 24px 60px rgba(160, 120, 64, 0.22);
     }
 
     #startButton {
-      background: #0b5ed7;
-      color: #ffffff;
-      font-size: 26px;
-      padding: 24px 34px;
-      min-width: 280px;
+      border-color: rgba(201, 169, 110, 0.45);
+      background: linear-gradient(180deg, #F7E2A6 0%, var(--gold) 100%);
+      color: #21170f;
+    }
+
+    #startButton:hover:not(:disabled),
+    #startButton:focus-visible {
+      background: linear-gradient(180deg, #FFE9AD 0%, #D7B777 100%);
     }
 
     #stopButton {
-      background: #bb2d3b;
-      color: #ffffff;
+      border-color: rgba(192, 57, 43, 0.36);
+      background: #fff5f3;
+      color: var(--danger);
+      animation: recordPulse 1.8s ease-in-out infinite;
+    }
+
+    .record-icon,
+    .stop-icon {
+      display: block;
+      width: 34px;
+      height: 34px;
+    }
+
+    .record-icon {
+      border-radius: 18px 18px 22px 22px;
+      border: 3px solid currentColor;
+      border-bottom-width: 7px;
+    }
+
+    .stop-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      background: currentColor;
     }
 
     .status-grid {
       display: grid;
       gap: 12px;
-      margin-top: 24px;
     }
 
     .status-row {
@@ -101,28 +539,28 @@
       justify-content: space-between;
       gap: 16px;
       padding: 14px 16px;
-      border: 1px solid #e2e7f0;
-      border-radius: 8px;
-      background: #fafbfe;
+      border: 1px solid rgba(160, 120, 64, 0.16);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.72);
       text-align: left;
     }
 
     .status-row strong {
-      color: #303b4d;
+      color: var(--text-primary);
     }
 
     .connected {
-      color: #0f5132;
+      color: var(--success);
       font-weight: 700;
     }
 
     .disconnected {
-      color: #842029;
+      color: var(--text-secondary);
       font-weight: 700;
     }
 
     .recording {
-      color: #bb2d3b;
+      color: var(--gold-dark);
       font-weight: 700;
     }
 
@@ -132,51 +570,266 @@
 
     #message {
       min-height: 24px;
-      margin-top: 18px;
-      color: #526070;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .wake-lock-status {
+      margin: -4px 0 0;
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    @keyframes recordPulse {
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.16), 0 24px 60px rgba(160, 120, 64, 0.18);
+      }
+      50% {
+        box-shadow: 0 0 0 14px rgba(192, 57, 43, 0), 0 24px 60px rgba(160, 120, 64, 0.18);
+      }
+    }
+
+    @keyframes pinShake {
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+      25% {
+        transform: translateX(-7px);
+      }
+      50% {
+        transform: translateX(7px);
+      }
+      75% {
+        transform: translateX(-4px);
+      }
+    }
+
+    @media (max-width: 640px) {
+      main {
+        padding: 24px 20px 28px;
+      }
+
+      .screen {
+        min-height: calc(100vh - 52px);
+      }
+
+      .screen-header {
+        padding-top: 46px;
+      }
+
+      #storeScreen .screen-header {
+        padding-top: 0;
+      }
+
+      .status-row {
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #startButton,
+      #stopButton {
+        width: 168px;
+        height: 168px;
+        min-width: 168px;
+      }
+    }
+
+    @media (min-width: 720px) {
+      body {
+        padding: 24px;
+        align-items: center;
+      }
+
+      main {
+        min-height: auto;
+        border: 1px solid rgba(160, 120, 64, 0.18);
+        border-radius: 28px;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .screen {
+        min-height: 720px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
     }
   </style>
 </head>
 <body>
   <main>
-    <p class="label">Salesperson</p>
-    <div id="salespersonName" class="salesperson">Unknown</div>
-
-    <h1>Audio Recorder</h1>
-
-    <div class="controls">
-      <button id="startButton" type="button">Start Recording</button>
-      <button id="stopButton" type="button" class="hidden">Stop</button>
-    </div>
-
-    <div class="status-grid" aria-live="polite">
-      <div class="status-row">
-        <strong>Connection</strong>
-        <span id="connectionStatus" class="disconnected">Disconnected</span>
+    <section id="storeScreen" class="screen" aria-labelledby="storeHeading">
+      <div class="screen-header">
+        <img class="brand-logo" alt="MK Jewels" src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20920%20220'%3E%3Crect%20width='920'%20height='220'%20fill='%23fffaf2'/%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20x2='0'%20y1='0'%20y2='1'%3E%3Cstop%20stop-color='%23f4d990'/%3E%3Cstop%20offset='0.5'%20stop-color='%23c9a96e'/%3E%3Cstop%20offset='1'%20stop-color='%23a07840'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext%20x='460'%20y='138'%20text-anchor='middle'%20font-family='Arial%20Black,Impact,sans-serif'%20font-size='108'%20font-weight='900'%20letter-spacing='10'%20fill='url(%23g)'%20stroke='%23775b2f'%20stroke-width='2'%3EMK%20JEWELS%3C/text%3E%3C/svg%3E">
+        <p class="header-overline">Sales floor recorder</p>
+        <h1 class="visual-heading">Select Your Store</h1>
+        <h1 id="storeHeading">MK Jewels — Select Store</h1>
       </div>
-      <div class="status-row">
-        <strong>Recording</strong>
-        <span id="recordingStatus">Stopped</span>
-      </div>
-    </div>
+      <p id="storeLoading" class="subheading">Loading...</p>
+      <div id="storeList" class="selection-list"></div>
+    </section>
 
-    <div id="message"></div>
+    <section id="salespersonScreen" class="screen hidden" aria-labelledby="salespersonHeading">
+      <div class="screen-header">
+        <img class="brand-logo" alt="MK Jewels" src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20920%20220'%3E%3Crect%20width='920'%20height='220'%20fill='%23fffaf2'/%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20x2='0'%20y1='0'%20y2='1'%3E%3Cstop%20stop-color='%23f4d990'/%3E%3Cstop%20offset='0.5'%20stop-color='%23c9a96e'/%3E%3Cstop%20offset='1'%20stop-color='%23a07840'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext%20x='460'%20y='138'%20text-anchor='middle'%20font-family='Arial%20Black,Impact,sans-serif'%20font-size='108'%20font-weight='900'%20letter-spacing='10'%20fill='url(%23g)'%20stroke='%23775b2f'%20stroke-width='2'%3EMK%20JEWELS%3C/text%3E%3C/svg%3E">
+        <p class="header-overline">Team selection</p>
+        <h1 class="visual-heading">Who are you?</h1>
+        <button id="backToStoresButton" class="back-button" type="button">← Back</button>
+        <h1 id="salespersonHeading">Who are you?</h1>
+        <p id="selectedStoreName" class="subheading"></p>
+      </div>
+      <p id="salespersonLoading" class="subheading">Loading...</p>
+      <form id="salespersonForm" class="salesperson-form">
+        <select id="salespersonSelect" class="salesperson-select" disabled>
+          <option value="">Select your name</option>
+        </select>
+        <div id="rememberedAuth" class="remembered-auth hidden">
+          <p id="rememberedAuthMessage"></p>
+          <div class="remembered-auth-actions">
+            <button id="rememberedContinueButton" class="primary-button" type="button">Continue</button>
+            <button id="clearRememberedAuthButton" class="text-link" type="button">Not you? Change</button>
+          </div>
+        </div>
+        <button id="salespersonContinueButton" class="primary-button" type="button" disabled>Continue</button>
+
+        <div id="pinStep" class="pin-step hidden">
+          <div id="pinSetupBanner" class="pin-setup-banner hidden">First time? Set your PIN.</div>
+          <h2 id="pinStepHeading" class="step-heading">Enter your PIN</h2>
+          <div id="pinInputRow" class="pin-input-row" aria-label="4 digit PIN">
+            <input class="pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+          <p id="confirmPinLabel" class="label hidden">Confirm PIN</p>
+          <div id="confirmPinInputRow" class="pin-input-row hidden" aria-label="Confirm 4 digit PIN">
+            <input class="pin-digit confirm-pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit confirm-pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit confirm-pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+            <input class="pin-digit confirm-pin-digit" type="tel" inputmode="numeric" maxlength="1" autocomplete="off">
+          </div>
+          <p id="pinMessage" class="pin-error" aria-live="polite"></p>
+          <button id="pinSubmitButton" class="primary-button" type="submit">Start</button>
+          <p class="forgot-pin">Forgot PIN? Ask your manager.</p>
+        </div>
+      </form>
+    </section>
+
+    <section id="recordingScreen" class="screen hidden" aria-labelledby="recordingHeading">
+      <div class="recording-card">
+        <div>
+          <img class="brand-logo" alt="MK Jewels" src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20920%20220'%3E%3Crect%20width='920'%20height='220'%20fill='%23fffaf2'/%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20x2='0'%20y1='0'%20y2='1'%3E%3Cstop%20stop-color='%23f4d990'/%3E%3Cstop%20offset='0.5'%20stop-color='%23c9a96e'/%3E%3Cstop%20offset='1'%20stop-color='%23a07840'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ctext%20x='460'%20y='138'%20text-anchor='middle'%20font-family='Arial%20Black,Impact,sans-serif'%20font-size='108'%20font-weight='900'%20letter-spacing='10'%20fill='url(%23g)'%20stroke='%23775b2f'%20stroke-width='2'%3EMK%20JEWELS%3C/text%3E%3C/svg%3E">
+          <p class="header-overline">Ready to capture</p>
+          <h1 class="visual-heading">Recording</h1>
+          <button id="signOutButton" class="sign-out-link" type="button">Sign out</button>
+          <h1 id="recordingHeading">Audio Recorder</h1>
+          <p class="subheading">Keep this screen open while the conversation is active.</p>
+        </div>
+
+        <div class="identity-grid">
+          <div class="identity-item">
+            <p class="label">Store</p>
+            <div id="recordingStoreName" class="identity-value">Unknown</div>
+          </div>
+          <div class="identity-item">
+            <p class="label">Salesperson</p>
+            <div id="salespersonName" class="identity-value">Unknown</div>
+          </div>
+          <div class="identity-item">
+            <p class="label">Designation</p>
+            <div id="salespersonDesignation" class="identity-value">Unknown</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="startButton" type="button">
+            <span class="record-icon" aria-hidden="true"></span>
+            <span>Start Recording</span>
+          </button>
+          <button id="stopButton" type="button" class="hidden">
+            <span class="stop-icon" aria-hidden="true"></span>
+            <span>Tap to stop</span>
+          </button>
+        </div>
+
+        <div class="status-grid" aria-live="polite">
+          <div class="status-row">
+            <strong>Connection</strong>
+            <span id="connectionStatus" class="disconnected">Disconnected</span>
+          </div>
+          <div class="status-row">
+            <strong>Recording</strong>
+            <span id="recordingStatus">Stopped</span>
+          </div>
+        </div>
+
+        <p id="wakeLockStatus" class="wake-lock-status"></p>
+        <div id="message"></div>
+      </div>
+    </section>
   </main>
 
   <script>
     const TARGET_SAMPLE_RATE = 16000;
+    const WS_PORT = 8765;
 
-    const params = new URLSearchParams(window.location.search);
-    const salespersonName = (params.get("name") || "Unknown").trim() || "Unknown";
-    const websocketUrl = `ws://${window.location.hostname}:8765?name=${encodeURIComponent(salespersonName)}`;
-
+    const storeScreen = document.getElementById("storeScreen");
+    const salespersonScreen = document.getElementById("salespersonScreen");
+    const recordingScreen = document.getElementById("recordingScreen");
+    const storeLoading = document.getElementById("storeLoading");
+    const storeList = document.getElementById("storeList");
+    const salespersonLoading = document.getElementById("salespersonLoading");
+    const salespersonForm = document.getElementById("salespersonForm");
+    const salespersonSelect = document.getElementById("salespersonSelect");
+    const rememberedAuth = document.getElementById("rememberedAuth");
+    const rememberedAuthMessage = document.getElementById("rememberedAuthMessage");
+    const rememberedContinueButton = document.getElementById("rememberedContinueButton");
+    const clearRememberedAuthButton = document.getElementById("clearRememberedAuthButton");
+    const salespersonContinueButton = document.getElementById("salespersonContinueButton");
+    const pinStep = document.getElementById("pinStep");
+    const pinSetupBanner = document.getElementById("pinSetupBanner");
+    const pinStepHeading = document.getElementById("pinStepHeading");
+    const pinInputRow = document.getElementById("pinInputRow");
+    const pinDigits = Array.from(pinInputRow.querySelectorAll(".pin-digit"));
+    const confirmPinLabel = document.getElementById("confirmPinLabel");
+    const confirmPinInputRow = document.getElementById("confirmPinInputRow");
+    const confirmPinDigits = Array.from(confirmPinInputRow.querySelectorAll(".pin-digit"));
+    const selectedStoreNameElement = document.getElementById("selectedStoreName");
+    const backToStoresButton = document.getElementById("backToStoresButton");
+    const pinSubmitButton = document.getElementById("pinSubmitButton");
+    const pinMessage = document.getElementById("pinMessage");
+    const recordingStoreNameElement = document.getElementById("recordingStoreName");
     const salespersonNameElement = document.getElementById("salespersonName");
+    const salespersonDesignationElement = document.getElementById("salespersonDesignation");
+    const signOutButton = document.getElementById("signOutButton");
     const startButton = document.getElementById("startButton");
     const stopButton = document.getElementById("stopButton");
     const connectionStatus = document.getElementById("connectionStatus");
     const recordingStatus = document.getElementById("recordingStatus");
+    const wakeLockStatus = document.getElementById("wakeLockStatus");
     const message = document.getElementById("message");
 
+    let wakeLock = null;
+    let selectedStore = null;
+    let selectedSalesperson = null;
+    let authenticatedSalesperson = null;
+    let rememberedSalesperson = null;
+    let pinMode = "auth";
+    let availableSalespersons = [];
     let audioContext = null;
     let mediaStream = null;
     let sourceNode = null;
@@ -189,16 +842,517 @@
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
 
-    salespersonNameElement.textContent = salespersonName;
+    wakeLockStatus.textContent = "wakeLock" in navigator ? "" : "Screen lock: unavailable";
 
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && wakeLock === null) {
+        acquireWakeLock();
+      }
+    }
+
+    async function acquireWakeLock() {
+      if (!("wakeLock" in navigator)) {
+        wakeLockStatus.textContent = "Screen lock: unavailable";
+        return;
+      }
+
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => {
+          wakeLock = null;
+        });
+        wakeLockStatus.textContent = "Screen will stay on";
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+      } catch (error) {
+        wakeLock = null;
+        wakeLockStatus.textContent = "Screen lock: unavailable";
+        console.log("Wake Lock unavailable:", error);
+      }
+    }
+
+    async function releaseWakeLock() {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
+      if (wakeLock !== null) {
+        try {
+          await wakeLock.release();
+        } catch (error) {
+          console.log("Wake Lock release failed:", error);
+        } finally {
+          wakeLock = null;
+        }
+      }
+      wakeLockStatus.textContent = "wakeLock" in navigator ? "" : "Screen lock: unavailable";
+    }
+
+    backToStoresButton.addEventListener("click", () => {
+      if (!pinStep.classList.contains("hidden")) {
+        resetPinStep();
+        salespersonSelect.disabled = false;
+        salespersonContinueButton.disabled = !selectedSalesperson;
+        return;
+      }
+
+      resetSalespersonStep();
+      showScreen(storeScreen);
+    });
+    salespersonSelect.addEventListener("change", handleSalespersonSelectChange);
+    rememberedContinueButton.addEventListener("click", continueWithRememberedAuth);
+    clearRememberedAuthButton.addEventListener("click", clearRememberedAuth);
+    salespersonContinueButton.addEventListener("click", revealPinStep);
+    salespersonForm.addEventListener("submit", authenticateSelectedSalesperson);
+    bindPinInputs(pinDigits);
+    bindPinInputs(confirmPinDigits);
     startButton.addEventListener("click", startRecording);
     stopButton.addEventListener("click", () => {
       userInitiatedStop = true;
       stopRecording();
     });
+    signOutButton.addEventListener("click", signOutSalesperson);
     window.addEventListener("beforeunload", stopRecording);
 
+    loadStores();
+
+    async function loadStores() {
+      storeLoading.textContent = "Loading...";
+      storeLoading.classList.remove("hidden");
+      storeList.innerHTML = "";
+
+      try {
+        const stores = await fetchJson("/api/stores");
+        storeLoading.classList.add("hidden");
+
+        if (!stores.length) {
+          storeLoading.textContent = "No stores found.";
+          storeLoading.classList.remove("hidden");
+          return;
+        }
+
+        stores.forEach((store) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "selection-button";
+          button.innerHTML = `<span class="store-name">${escapeHtml(store.name)}</span>`;
+          button.addEventListener("click", () => selectStore(store));
+          storeList.appendChild(button);
+        });
+      } catch (error) {
+        storeLoading.textContent = `Unable to load stores: ${error.message}`;
+      }
+    }
+
+    async function selectStore(store) {
+      selectedStore = store;
+      resetSalespersonStep();
+      selectedStoreNameElement.textContent = store.name;
+      salespersonLoading.textContent = "Loading...";
+      salespersonLoading.classList.remove("hidden");
+      salespersonForm.classList.add("hidden");
+      showScreen(salespersonScreen);
+
+      try {
+        const salespersons = await fetchJson(`/api/stores/${encodeURIComponent(store.id)}/salespersons`);
+        availableSalespersons = salespersons;
+        salespersonLoading.classList.add("hidden");
+
+        if (!salespersons.length) {
+          salespersonLoading.textContent = "No salespersons found.";
+          salespersonLoading.classList.remove("hidden");
+          return;
+        }
+
+        renderSalespersonOptions(salespersons);
+        salespersonForm.classList.remove("hidden");
+      } catch (error) {
+        salespersonLoading.textContent = `Unable to load salespersons: ${error.message}`;
+      }
+    }
+
+    function renderSalespersonOptions(salespersons) {
+      salespersonSelect.innerHTML = '<option value="">Select your name</option>';
+      salespersons.forEach((salesperson) => {
+        const option = document.createElement("option");
+        option.value = String(salesperson.id);
+        option.textContent = `${salesperson.name} — ${salesperson.designation}`;
+        salespersonSelect.appendChild(option);
+      });
+      salespersonSelect.disabled = false;
+    }
+
+    function getAuthStorageKey(salespersonId) {
+      return `mkj_auth_${salespersonId}`;
+    }
+
+    function getStoredAuthForSalesperson(salespersonId) {
+      const key = getAuthStorageKey(salespersonId);
+      try {
+        const stored = JSON.parse(localStorage.getItem(key) || "null");
+        if (!stored || stored.salesperson_id !== salespersonId || stored.expires <= Date.now()) {
+          localStorage.removeItem(key);
+          return null;
+        }
+        return stored;
+      } catch (error) {
+        localStorage.removeItem(key);
+        return null;
+      }
+    }
+
+    function storeSalespersonAuth(salesperson) {
+      const authData = {
+        salesperson_id: salesperson.id,
+        name: salesperson.name,
+        store_id: salesperson.store_id,
+        designation: salesperson.designation,
+        expires: Date.now() + (12 * 60 * 60 * 1000)
+      };
+      localStorage.setItem(getAuthStorageKey(salesperson.id), JSON.stringify(authData));
+    }
+
+    function updateRememberedAuthState() {
+      salespersonContinueButton.disabled = !selectedSalesperson;
+      rememberedAuth.classList.add("hidden");
+
+      if (!selectedSalesperson) {
+        return;
+      }
+
+      rememberedSalesperson = getStoredAuthForSalesperson(selectedSalesperson.id);
+      if (!rememberedSalesperson) {
+        return;
+      }
+
+      rememberedAuthMessage.textContent = `✓ Welcome back, ${rememberedSalesperson.name}`;
+      rememberedAuth.classList.remove("hidden");
+      salespersonContinueButton.disabled = true;
+    }
+
+    function continueWithRememberedAuth() {
+      if (!rememberedSalesperson || !selectedSalesperson) {
+        return;
+      }
+
+      completeSalespersonAuth({
+        ...selectedSalesperson,
+        id: rememberedSalesperson.salesperson_id,
+        name: rememberedSalesperson.name,
+        store_id: rememberedSalesperson.store_id,
+        designation: rememberedSalesperson.designation
+      }, false);
+    }
+
+    function clearRememberedAuth() {
+      if (selectedSalesperson) {
+        localStorage.removeItem(getAuthStorageKey(selectedSalesperson.id));
+      }
+      rememberedSalesperson = null;
+      rememberedAuth.classList.add("hidden");
+      salespersonContinueButton.disabled = !selectedSalesperson;
+      resetPinStep();
+    }
+
+    function handleSalespersonSelectChange() {
+      selectedSalesperson = availableSalespersons.find(
+        (salesperson) => String(salesperson.id) === salespersonSelect.value
+      ) || null;
+      authenticatedSalesperson = null;
+      rememberedSalesperson = null;
+      resetPinStep();
+      updateRememberedAuthState();
+    }
+
+    function revealPinStep() {
+      if (!selectedSalesperson) {
+        return;
+      }
+
+      setPinMode("auth");
+      salespersonSelect.disabled = true;
+      salespersonContinueButton.disabled = true;
+      rememberedAuth.classList.add("hidden");
+      pinStep.classList.remove("hidden");
+      window.setTimeout(() => pinDigits[0].focus(), 0);
+    }
+
+    function bindPinInputs(inputs) {
+      inputs.forEach((input, index) => {
+        input.addEventListener("input", () => handlePinInput(inputs, input, index));
+        input.addEventListener("keydown", (event) => handlePinKeydown(inputs, event, input, index));
+        input.addEventListener("paste", (event) => handlePinPaste(inputs, event));
+      });
+    }
+
+    function handlePinInput(inputs, input, index) {
+      input.value = input.value.replace(/\D/g, "").slice(0, 1);
+      pinMessage.textContent = "";
+      updatePinSubmitState();
+
+      if (input.value && index < inputs.length - 1) {
+        inputs[index + 1].focus();
+      }
+    }
+
+    function handlePinKeydown(inputs, event, input, index) {
+      if (event.key === "Backspace" && !input.value && index > 0) {
+        inputs[index - 1].focus();
+      }
+    }
+
+    function handlePinPaste(inputs, event) {
+      event.preventDefault();
+      const digits = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 4);
+      digits.split("").forEach((digit, index) => {
+        inputs[index].value = digit;
+      });
+      updatePinSubmitState();
+      const nextIndex = Math.min(digits.length, inputs.length - 1);
+      inputs[nextIndex].focus();
+    }
+
+    function getEnteredPin(inputs = pinDigits) {
+      return inputs.map((input) => input.value).join("");
+    }
+
+    function resetPinStep() {
+      pinStep.classList.add("hidden");
+      setPinMode("auth");
+      clearPinInputs();
+      pinInputRow.classList.remove("shake");
+      confirmPinInputRow.classList.remove("shake");
+      pinMessage.textContent = "";
+    }
+
+    function resetSalespersonStep() {
+      selectedSalesperson = null;
+      authenticatedSalesperson = null;
+      availableSalespersons = [];
+      salespersonSelect.innerHTML = '<option value="">Select your name</option>';
+      salespersonSelect.disabled = true;
+      salespersonContinueButton.disabled = true;
+      rememberedSalesperson = null;
+      rememberedAuth.classList.add("hidden");
+      salespersonForm.classList.add("hidden");
+      resetPinStep();
+    }
+
+    function clearPinInputs() {
+      [...pinDigits, ...confirmPinDigits].forEach((input) => {
+        input.value = "";
+      });
+      updatePinSubmitState();
+    }
+
+    function showPinError(text, rows = [pinInputRow], focusInput = pinDigits[0]) {
+      clearPinInputs();
+      pinMessage.textContent = text;
+      rows.forEach((row) => row.classList.remove("shake"));
+      void pinInputRow.offsetWidth;
+      rows.forEach((row) => row.classList.add("shake"));
+      focusInput.focus();
+    }
+
+    function showIncorrectPin() {
+      showPinError("Incorrect PIN", [pinInputRow], pinDigits[0]);
+    }
+
+    function setPinMode(mode) {
+      pinMode = mode;
+      const setupMode = mode === "setup";
+      pinStep.classList.toggle("setup-mode", setupMode);
+      pinSetupBanner.classList.toggle("hidden", !setupMode);
+      confirmPinLabel.classList.toggle("hidden", !setupMode);
+      confirmPinInputRow.classList.toggle("hidden", !setupMode);
+      pinStepHeading.textContent = setupMode ? "Choose a 4-digit PIN" : "Enter your PIN";
+      pinSubmitButton.textContent = setupMode ? "Set PIN" : "Start";
+      pinSubmitButton.type = "submit";
+      document.querySelector(".forgot-pin").classList.toggle("hidden", setupMode);
+      clearPinInputs();
+      pinMessage.textContent = "";
+    }
+
+    function updatePinSubmitState() {
+      if (pinMode === "setup") {
+        pinSubmitButton.disabled = getEnteredPin(pinDigits).length !== 4
+          || getEnteredPin(confirmPinDigits).length !== 4;
+      } else {
+        pinSubmitButton.disabled = false;
+      }
+    }
+
+    async function authenticateSelectedSalesperson(event) {
+      event.preventDefault();
+
+      if (!selectedSalesperson) {
+        return;
+      }
+
+      if (pinMode === "setup") {
+        await setFirstPin();
+        return;
+      }
+
+      const pin = getEnteredPin();
+      if (!/^\d{4}$/.test(pin)) {
+        showIncorrectPin();
+        return;
+      }
+
+      pinSubmitButton.disabled = true;
+      pinMessage.textContent = "Checking PIN...";
+
+      try {
+        const result = await fetchJson("/api/auth/salesperson", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            salesperson_id: selectedSalesperson.id,
+            pin
+          })
+        });
+
+        if (result.reason === "NO_PIN_SET") {
+          showFirstPinSetup();
+          return;
+        }
+
+        const salesperson = {
+          ...selectedSalesperson,
+          id: result.salesperson_id,
+          name: result.name,
+          store_id: result.store_id,
+          designation: result.designation
+        };
+        completeSalespersonAuth(salesperson, true);
+        clearPinInputs();
+        pinMessage.textContent = "";
+      } catch (error) {
+        authenticatedSalesperson = null;
+        showIncorrectPin();
+      } finally {
+        if (pinMode === "auth") {
+          pinSubmitButton.disabled = false;
+        }
+      }
+    }
+
+    function showFirstPinSetup() {
+      setPinMode("setup");
+      pinStep.classList.remove("hidden");
+      salespersonSelect.disabled = true;
+      salespersonContinueButton.disabled = true;
+      window.setTimeout(() => pinDigits[0].focus(), 0);
+    }
+
+    async function setFirstPin() {
+      if (!selectedSalesperson) {
+        return;
+      }
+
+      const pin = getEnteredPin(pinDigits);
+      const confirmPin = getEnteredPin(confirmPinDigits);
+      if (!/^\d{4}$/.test(pin) || !/^\d{4}$/.test(confirmPin)) {
+        updatePinSubmitState();
+        return;
+      }
+
+      if (pin !== confirmPin) {
+        showPinError("PINs don't match", [pinInputRow, confirmPinInputRow], pinDigits[0]);
+        return;
+      }
+
+      pinSubmitButton.disabled = true;
+      pinMessage.textContent = "Setting PIN...";
+
+      try {
+        const result = await fetchJson("/api/auth/salesperson/set-first-pin", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            salesperson_id: selectedSalesperson.id,
+            pin
+          })
+        });
+
+        if (!result.success) {
+          throw new Error(result.error || "Unable to set PIN");
+        }
+
+        completeSalespersonAuth(selectedSalesperson, true);
+        clearPinInputs();
+        pinMessage.textContent = "";
+      } catch (error) {
+        pinMessage.textContent = error.message;
+        pinSubmitButton.disabled = false;
+      }
+    }
+
+    function completeSalespersonAuth(salesperson, persistAuth) {
+      authenticatedSalesperson = salesperson;
+      if (authenticatedSalesperson.store_id !== selectedStore.id) {
+        throw new Error("Salesperson store mismatch");
+      }
+
+      if (persistAuth) {
+        storeSalespersonAuth(authenticatedSalesperson);
+      }
+
+      recordingStoreNameElement.textContent = selectedStore.name;
+      salespersonNameElement.textContent = authenticatedSalesperson.name;
+      salespersonDesignationElement.textContent = authenticatedSalesperson.designation;
+      showScreen(recordingScreen);
+    }
+
+    function signOutSalesperson() {
+      if (authenticatedSalesperson) {
+        localStorage.removeItem(getAuthStorageKey(authenticatedSalesperson.id));
+      }
+      authenticatedSalesperson = null;
+      rememberedSalesperson = null;
+      resetSalespersonStep();
+      showScreen(storeScreen);
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      return data;
+    }
+
+    function showScreen(screen) {
+      [storeScreen, salespersonScreen, recordingScreen].forEach((element) => {
+        element.classList.toggle("hidden", element !== screen);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#039;"
+      }[character]));
+    }
+
+    function buildWebSocketUrl() {
+      const salespersonName = authenticatedSalesperson.name.trim() || "Unknown";
+      return `ws://${window.location.hostname}:${WS_PORT}?name=${encodeURIComponent(salespersonName)}&salesperson_id=${authenticatedSalesperson.id}&store_id=${selectedStore.id}`;
+    }
+
     async function startRecording() {
+      if (!selectedStore || !authenticatedSalesperson) {
+        message.textContent = "Verify your PIN before recording.";
+        return;
+      }
+
+      acquireWakeLock();
       startButton.disabled = true;
       userInitiatedStop = false;
       reconnectAttempts = 0;
@@ -222,7 +1376,7 @@
     }
 
     function connectWebSocket() {
-      websocket = new WebSocket(websocketUrl);
+      websocket = new WebSocket(buildWebSocketUrl());
       websocket.binaryType = "arraybuffer";
 
       websocket.addEventListener("open", () => {
@@ -350,6 +1504,7 @@
       recordingStatus.textContent = "Stopped";
       recordingStatus.className = "";
       setConnectionStatus(false);
+      releaseWakeLock();
     }
 
     function updateRecordingCounter() {
@@ -404,6 +1559,14 @@
       }
 
       return result;
+    }
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/static/sw.js')
+          .catch(err => console.log('SW registration failed:', err));
+      });
     }
   </script>
 </body>

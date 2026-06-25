@@ -1,0 +1,16 @@
+{
+  "name": "MK Jewels Manager",
+  "short_name": "MK Manager",
+  "description": "MK Jewels store manager dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A0A",
+  "theme_color": "#C9A96E",
+  "icons": [
+    {
+      "src": "/brand/mk-jewels-dark.jpeg",
+      "sizes": "any",
+      "type": "image/jpeg"
+    }
+  ]
+}

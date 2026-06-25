@@ -185,6 +185,44 @@ def test_save_feedback_updates_manager_feedback(db):
     assert updated_event["manager_feedback"] == "useful"
 
 
+def test_salesperson_pin_is_hashed_and_verified(db):
+    with db._lock:
+        db._connection.execute(
+            """
+            INSERT INTO stores (name, slug, created_at)
+            VALUES (?, ?, ?)
+            """,
+            ("Bandra", "bandra", db._utc_now()),
+        )
+        store_id = db._connection.execute(
+            "SELECT id FROM stores WHERE slug = ?",
+            ("bandra",),
+        ).fetchone()["id"]
+        cursor = db._connection.execute(
+            """
+            INSERT INTO salespersons (store_id, name, designation, is_active, created_at)
+            VALUES (?, ?, ?, 1, ?)
+            """,
+            (store_id, "Maya", "Sales Executive", db._utc_now()),
+        )
+        salesperson_id = cursor.lastrowid
+        db._connection.commit()
+
+    assert db.verify_salesperson_pin(salesperson_id, "1234") is False
+    assert db.set_salesperson_pin(salesperson_id, "1234") is True
+    assert db.verify_salesperson_pin(salesperson_id, "1234") is True
+    assert db.verify_salesperson_pin(salesperson_id, "0000") is False
+
+    with db._lock:
+        pin_hash = db._connection.execute(
+            "SELECT pin_hash FROM salespersons WHERE id = ?",
+            (salesperson_id,),
+        ).fetchone()["pin_hash"]
+
+    assert pin_hash != "1234"
+    assert pin_hash.startswith("$2")
+
+
 def test_close_session_sets_end_time(db):
     session_id = db.create_session("Maya")
 
@@ -197,3 +235,42 @@ def test_close_session_sets_end_time(db):
         ).fetchone()[0]
 
     assert end_time is not None
+
+
+def test_delete_session_removes_session_and_events(db):
+    session_id = db.create_session("Maya")
+    db.log_event(session_id, "Maya", event_dict())
+    db.log_event(session_id, "Maya", event_dict())
+
+    deleted = db.delete_session(session_id)
+
+    assert deleted is True
+    assert db.get_session_events(session_id) == []
+
+    with sqlite3.connect(db.db_path) as connection:
+        session_count = connection.execute(
+            "SELECT COUNT(*) FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()[0]
+        event_count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()[0]
+
+    assert session_count == 0
+    assert event_count == 0
+
+
+def test_delete_session_returns_false_for_missing_session(db):
+    assert db.delete_session("missing-session") is False
+
+
+def test_get_session_events_returns_empty_after_delete_session(db):
+    session_id = db.create_session("Maya")
+    db.log_event(session_id, "Maya", event_dict())
+
+    assert len(db.get_session_events(session_id)) == 1
+
+    db.delete_session(session_id)
+
+    assert db.get_session_events(session_id) == []

@@ -34,8 +34,14 @@ class Config:
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
     SILENCE_THRESHOLD = int(os.getenv("SILENCE_THRESHOLD", "200"))
+    DIARIZATION_ENABLED = os.getenv("DIARIZATION_ENABLED", "false").lower() == "true"
+    HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
+    MIN_SPEAKER_SEGMENT_SECONDS = float(
+        os.getenv("MIN_SPEAKER_SEGMENT_SECONDS", "1.0")
+    )
     DB_PATH = os.getenv("DB_PATH", "sessions.db")
     POSTGRES_URL = os.getenv("POSTGRES_URL", "")
+    KNOWLEDGE_BASE_PATH = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge/")
     REPORT_HOUR = int(os.getenv("REPORT_HOUR", "21"))
     WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
     WS_PORT = int(os.getenv("WS_PORT", "8765"))

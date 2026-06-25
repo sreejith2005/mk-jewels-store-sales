@@ -12,7 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.exceptions import STTError, TriageError
 from core.logger import get_logger
 from core.schemas import EventDict, validate_event
-from transcription import indic_conformer_stt
+from config import Config
+from transcription import diarizer, indic_conformer_stt
 from triage import qwen3_triage
 
 
@@ -71,6 +72,33 @@ def transcribe_and_triage(
     transcript = ""
 
     try:
+        if Config.DIARIZATION_ENABLED:
+            try:
+                segments = diarizer.diarize(audio_bytes, sample_rate)
+                if segments:
+                    salesperson_speaker = diarizer.dominant_speaker(segments)
+                    salesperson_audio = diarizer.extract_speaker_audio(
+                        audio_bytes,
+                        sample_rate,
+                        segments,
+                        salesperson_speaker,
+                    )
+                    if salesperson_audio:
+                        audio_bytes = salesperson_audio
+                        logger.info(
+                            "Diarization: using speaker %s (%d segments)",
+                            salesperson_speaker,
+                            len(segments),
+                        )
+                    else:
+                        logger.warning(
+                            "Diarization: no audio for dominant speaker, using full audio"
+                        )
+                else:
+                    logger.warning("Diarization: no segments returned, using full audio")
+            except STTError as error:
+                logger.error("Diarization failed, using full audio: %s", error)
+
         try:
             transcript = indic_conformer_stt.transcribe(audio_bytes, sample_rate)
         except STTError as error:

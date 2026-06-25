@@ -51,10 +51,12 @@ class Session:
         salesperson_name: str,
         device_index: int,
         on_event: Optional[Callable[[str, dict], None]] = None,
+        store_name: str = "MK Jewels",
     ):
         self.salesperson_name = salesperson_name
         self.device_index = device_index
         self.on_event = on_event
+        self.store_name = store_name
         self.db = Database()
         self.session_id = self.db.create_session(salesperson_name)
         self.alert_manager = AlertManager()
@@ -137,10 +139,15 @@ class Session:
 
         self.events.append(event)
         self.transcript_log.append(event.get("transcript", ""))
-        self.db.log_event(self.session_id, self.salesperson_name, event)
+        event_id = self.db.log_event(self.session_id, self.salesperson_name, event)
 
         if self.alert_manager.should_alert(event):
-            self.alert_manager.send_alert(self.salesperson_name, event)
+            self.alert_manager.send_alert(
+                self.salesperson_name,
+                event,
+                store_name=self.store_name,
+                event_id=event_id,
+            )
 
         if self.on_event:
             self.on_event(self.salesperson_name, event)
@@ -153,11 +160,13 @@ class FileSession:
         salesperson_name: str,
         on_event: Optional[Callable[[str, dict], None]] = None,
         simulate_realtime: bool = False,
+        store_name: str = "MK Jewels",
     ):
         self.wav_file_path = wav_file_path
         self.salesperson_name = salesperson_name
         self.on_event = on_event
         self.simulate_realtime = simulate_realtime
+        self.store_name = store_name
         self.db = Database()
         self.session_id = self.db.create_session(salesperson_name)
         self.alert_manager = AlertManager()
@@ -278,10 +287,15 @@ class FileSession:
 
         self.events.append(event)
         self.transcript_log.append(event.get("transcript", ""))
-        self.db.log_event(self.session_id, self.salesperson_name, event)
+        event_id = self.db.log_event(self.session_id, self.salesperson_name, event)
 
         if self.alert_manager.should_alert(event):
-            self.alert_manager.send_alert(self.salesperson_name, event)
+            self.alert_manager.send_alert(
+                self.salesperson_name,
+                event,
+                store_name=self.store_name,
+                event_id=event_id,
+            )
 
         if self.on_event:
             self.on_event(self.salesperson_name, event)
