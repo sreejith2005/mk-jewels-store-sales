@@ -9,3 +9,6 @@ psycopg2-binary
 apscheduler
 transformers
 torch
+torchaudio
+onnx
+onnxruntime-gpu
