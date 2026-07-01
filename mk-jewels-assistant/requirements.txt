@@ -16,5 +16,8 @@ gunicorn
 pytest
 transformers
 torch
+torchaudio
+onnx
+onnxruntime-gpu
 # Optional: diarization (DIARIZATION_ENABLED=true in .env)
 pyannote.audio>=3.1.0
