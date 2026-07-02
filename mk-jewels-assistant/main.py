@@ -1,4 +1,6 @@
 import asyncio
+import argparse
+import os
 import socket
 import subprocess
 import time
@@ -10,6 +12,11 @@ from pipeline.session import FileSession, Session
 
 
 APP_DIR = Path(__file__).parent
+RUN_MODE_PROMPT = (
+    "Run mode: (1) Live mic  (2) Test with audio file  "
+    "(3) Start dashboard server  (4) Generate end-of-day report  "
+    "(5) Start live phone capture: "
+)
 
 
 def _get_lan_ip():
@@ -23,10 +30,28 @@ def _get_lan_ip():
         s.close()
 
 
-def main():
-    run_mode = input(
-        "Run mode: (1) Live mic  (2) Test with audio file  (3) Start dashboard server  (4) Generate end-of-day report  (5) Start live phone capture: "
-    ).strip()
+def resolve_run_mode(
+    argv: list[str] | None = None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    """Resolve run mode from CLI, environment, or the interactive prompt."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", help="Run mode: 1, 2, 3, 4, or 5")
+    args = parser.parse_args(argv)
+
+    if args.mode is not None:
+        return args.mode.strip()
+
+    environment = os.environ if environ is None else environ
+    env_mode = environment.get("RUN_MODE")
+    if env_mode is not None:
+        return env_mode.strip()
+
+    return input(RUN_MODE_PROMPT).strip()
+
+
+def main(argv: list[str] | None = None):
+    run_mode = resolve_run_mode(argv)
 
     if run_mode == "3":
         if Config.PIPELINE_MODE == "demo":
