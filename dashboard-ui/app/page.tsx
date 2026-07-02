@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:5000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const DASHBOARD_AUTH_USER = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_USER;
 const DASHBOARD_AUTH_PASS = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_PASS;
 const REFRESH_MS = 8000;

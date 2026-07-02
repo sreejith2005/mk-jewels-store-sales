@@ -14,6 +14,13 @@ pnpm dev
 bun dev
 ```
 
+API requests use same-origin relative paths by default. For local development
+against the Flask backend on port 5000, create `.env.local` with:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:5000
+```
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
