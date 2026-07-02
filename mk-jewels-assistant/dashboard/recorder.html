@@ -785,7 +785,6 @@
 
   <script>
     const TARGET_SAMPLE_RATE = 16000;
-    const WS_PORT = 8765;
 
     const storeScreen = document.getElementById("storeScreen");
     const salespersonScreen = document.getElementById("salespersonScreen");
@@ -1343,7 +1342,9 @@
 
     function buildWebSocketUrl() {
       const salespersonName = authenticatedSalesperson.name.trim() || "Unknown";
-      return `ws://${window.location.hostname}:${WS_PORT}?name=${encodeURIComponent(salespersonName)}&salesperson_id=${authenticatedSalesperson.id}&store_id=${selectedStore.id}`;
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+      return `${wsUrl}?name=${encodeURIComponent(salespersonName)}&salesperson_id=${authenticatedSalesperson.id}&store_id=${selectedStore.id}`;
     }
 
     async function startRecording() {
