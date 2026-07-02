@@ -471,8 +471,7 @@
       padding: 12px 0 4px;
     }
 
-    #startButton,
-    #stopButton {
+    #startButton {
       position: relative;
       width: 176px;
       height: 176px;
@@ -502,7 +501,7 @@
       background: linear-gradient(180deg, #FFE9AD 0%, #D7B777 100%);
     }
 
-    #stopButton {
+    #startButton.recording-active {
       border-color: rgba(192, 57, 43, 0.36);
       background: #fff5f3;
       color: var(--danger);
@@ -632,8 +631,7 @@
         gap: 6px;
       }
 
-      #startButton,
-      #stopButton {
+      #startButton {
         width: 168px;
         height: 168px;
         min-width: 168px;
@@ -757,12 +755,8 @@
 
         <div class="controls">
           <button id="startButton" type="button">
-            <span class="record-icon" aria-hidden="true"></span>
-            <span>Start Recording</span>
-          </button>
-          <button id="stopButton" type="button" class="hidden">
-            <span class="stop-icon" aria-hidden="true"></span>
-            <span>Tap to stop</span>
+            <span id="recordButtonIcon" class="record-icon" aria-hidden="true"></span>
+            <span id="recordButtonLabel">Start Recording</span>
           </button>
         </div>
 
@@ -816,7 +810,8 @@
     const salespersonDesignationElement = document.getElementById("salespersonDesignation");
     const signOutButton = document.getElementById("signOutButton");
     const startButton = document.getElementById("startButton");
-    const stopButton = document.getElementById("stopButton");
+    const recordButtonIcon = document.getElementById("recordButtonIcon");
+    const recordButtonLabel = document.getElementById("recordButtonLabel");
     const connectionStatus = document.getElementById("connectionStatus");
     const recordingStatus = document.getElementById("recordingStatus");
     const wakeLockStatus = document.getElementById("wakeLockStatus");
@@ -902,10 +897,14 @@
     salespersonForm.addEventListener("submit", authenticateSelectedSalesperson);
     bindPinInputs(pinDigits);
     bindPinInputs(confirmPinDigits);
-    startButton.addEventListener("click", startRecording);
-    stopButton.addEventListener("click", () => {
-      userInitiatedStop = true;
-      stopRecording();
+    startButton.addEventListener("click", () => {
+      if (isRecording) {
+        userInitiatedStop = true;
+        stopRecording();
+        return;
+      }
+
+      startRecording();
     });
     signOutButton.addEventListener("click", signOutSalesperson);
     window.addEventListener("beforeunload", stopRecording);
@@ -1347,6 +1346,12 @@
       return `${wsUrl}?name=${encodeURIComponent(salespersonName)}&salesperson_id=${authenticatedSalesperson.id}&store_id=${selectedStore.id}`;
     }
 
+    function updateRecordButtonState() {
+      startButton.classList.toggle("recording-active", isRecording);
+      recordButtonIcon.className = isRecording ? "stop-icon" : "record-icon";
+      recordButtonLabel.textContent = isRecording ? "Stop Recording" : "Start Recording";
+    }
+
     async function startRecording() {
       if (!selectedStore || !authenticatedSalesperson) {
         message.textContent = "Verify your PIN before recording.";
@@ -1450,9 +1455,8 @@
 
       isRecording = true;
       recordingStartedAt = Date.now();
-      startButton.classList.add("hidden");
-      stopButton.classList.remove("hidden");
       startButton.disabled = false;
+      updateRecordButtonState();
       message.textContent = "";
       updateRecordingCounter();
       counterTimer = window.setInterval(updateRecordingCounter, 1000);
@@ -1500,8 +1504,7 @@
       websocket = null;
 
       startButton.disabled = false;
-      startButton.classList.remove("hidden");
-      stopButton.classList.add("hidden");
+      updateRecordButtonState();
       recordingStatus.textContent = "Stopped";
       recordingStatus.className = "";
       setConnectionStatus(false);
