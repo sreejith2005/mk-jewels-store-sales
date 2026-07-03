@@ -3,15 +3,18 @@ import argparse
 import os
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 from capture.mic_capture import MicCapture
 from config import Config
+from core.logger import get_logger
 from pipeline.session import FileSession, Session
 
 
 APP_DIR = Path(__file__).parent
+logger = get_logger(__name__)
 RUN_MODE_PROMPT = (
     "Run mode: (1) Live mic  (2) Test with audio file  "
     "(3) Start dashboard server  (4) Generate end-of-day report  "
@@ -76,10 +79,18 @@ def main(argv: list[str] | None = None):
 
     Config.validate()
 
-    if Config.PIPELINE_MODE == "production" and run_mode in {"1", "2", "5"}:
-        from transcription.local_pipeline import warmup_models
+    if run_mode in {"1", "2", "5"}:
+        from core.readiness import set_ready, wait_until_ready
+        from transcription.local_pipeline import load_models
 
-        warmup_models()
+        logger.info("Loading models - server will not accept connections until ready")
+        success = load_models()
+        if not success:
+            logger.error("Model loading failed - exiting")
+            sys.exit(1)
+        set_ready()
+        wait_until_ready(timeout=0)
+        logger.info("All models loaded - starting servers")
 
     if run_mode == "5":
         asyncio.run(start_live_phone_capture())

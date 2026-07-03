@@ -21,6 +21,7 @@ DASHBOARD_ROOT = Path(__file__).resolve().parent
 from alerting.console_alert import AlertManager  # noqa: E402
 from config import Config  # noqa: E402
 from core.logger import get_logger  # noqa: E402
+from core.readiness import is_ready  # noqa: E402
 from scoring.session_scoring import generate_and_save_session_score  # noqa: E402
 from storage.db import Database  # noqa: E402
 
@@ -42,6 +43,8 @@ _manager_failed_attempts: dict[str, dict[str, float | int]] = {}
 
 @app.before_request
 def require_manager_token() -> Any:
+    if request.method == "GET" and request.path == "/api/health":
+        return None
     if request.method == "GET" and request.path == "/recorder":
         return None
     if request.method == "GET" and request.path.startswith("/static/"):
@@ -65,6 +68,17 @@ def require_manager_token() -> Any:
 @app.get("/recorder")
 def get_recorder():
     return send_file(DASHBOARD_ROOT / "recorder.html")
+
+
+@app.get("/api/health")
+def get_health():
+    ready = Config.PIPELINE_MODE == "demo" or is_ready()
+    return jsonify(
+        {
+            "status": "ready" if ready else "loading",
+            "pipeline": Config.PIPELINE_MODE,
+        }
+    )
 
 
 @app.get("/static/sw.js")

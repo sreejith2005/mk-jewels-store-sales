@@ -583,6 +583,36 @@
       text-align: center;
     }
 
+    .readiness-banner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 44px;
+      padding: 10px 14px;
+      border: 1px solid var(--border-gold);
+      border-radius: 12px;
+      background: rgba(201, 169, 110, 0.12);
+      color: var(--gold-dark);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .readiness-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(160, 120, 64, 0.24);
+      border-top-color: var(--gold-dark);
+      border-radius: 999px;
+      animation: readinessSpin 900ms linear infinite;
+    }
+
+    @keyframes readinessSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
     @keyframes recordPulse {
       0%,
       100% {
@@ -760,6 +790,11 @@
           </button>
         </div>
 
+        <div id="readinessBanner" class="readiness-banner hidden" role="status" aria-live="polite">
+          <span class="readiness-spinner" aria-hidden="true"></span>
+          <span>System is warming up, please wait...</span>
+        </div>
+
         <div class="status-grid" aria-live="polite">
           <div class="status-row">
             <strong>Connection</strong>
@@ -816,6 +851,7 @@
     const recordingStatus = document.getElementById("recordingStatus");
     const wakeLockStatus = document.getElementById("wakeLockStatus");
     const message = document.getElementById("message");
+    const readinessBanner = document.getElementById("readinessBanner");
 
     let wakeLock = null;
     let selectedStore = null;
@@ -832,6 +868,8 @@
     let recordingStartedAt = 0;
     let counterTimer = null;
     let isRecording = false;
+    let isSystemReady = true;
+    let readinessPollTimer = null;
     let userInitiatedStop = false;
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
@@ -1302,6 +1340,7 @@
       salespersonNameElement.textContent = authenticatedSalesperson.name;
       salespersonDesignationElement.textContent = authenticatedSalesperson.designation;
       showScreen(recordingScreen);
+      checkReadiness();
     }
 
     function signOutSalesperson() {
@@ -1350,9 +1389,41 @@
       startButton.classList.toggle("recording-active", isRecording);
       recordButtonIcon.className = isRecording ? "stop-icon" : "record-icon";
       recordButtonLabel.textContent = isRecording ? "Stop Recording" : "Start Recording";
+      startButton.disabled = !isRecording && !isSystemReady;
+    }
+
+    function setReadinessState(ready) {
+      isSystemReady = ready;
+      readinessBanner.classList.toggle("hidden", ready);
+      updateRecordButtonState();
+    }
+
+    async function checkReadiness() {
+      if (readinessPollTimer) {
+        window.clearTimeout(readinessPollTimer);
+        readinessPollTimer = null;
+      }
+
+      try {
+        const health = await fetchJson("/api/health");
+        if (health.status === "ready") {
+          setReadinessState(true);
+          return;
+        }
+      } catch (error) {
+        console.log("Readiness check failed:", error);
+      }
+
+      setReadinessState(false);
+      readinessPollTimer = window.setTimeout(checkReadiness, 5000);
     }
 
     async function startRecording() {
+      if (!isSystemReady) {
+        message.textContent = "System is warming up, please wait...";
+        return;
+      }
+
       if (!selectedStore || !authenticatedSalesperson) {
         message.textContent = "Verify your PIN before recording.";
         return;

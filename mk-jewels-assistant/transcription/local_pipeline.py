@@ -4,6 +4,7 @@ import sys
 import time
 
 import numpy as np
+import requests
 from scipy.io import wavfile
 
 
@@ -25,34 +26,66 @@ logger.info(
 _MODELS_WARMED_UP = False
 
 
-def warmup_models() -> None:
-    """Prime production STT and triage models before the first real audio chunk."""
+def load_models() -> bool:
+    """Load and verify startup models before accepting production audio."""
     global _MODELS_WARMED_UP
+    if Config.PIPELINE_MODE == "demo":
+        logger.info("Demo mode active - skipping local model startup checks")
+        _MODELS_WARMED_UP = True
+        return True
+
     if _MODELS_WARMED_UP:
-        return
+        return True
 
     warmup_start = time.perf_counter()
     sample_rate = 16000
-    silent_audio = np.zeros(int(sample_rate * 0.5), dtype=np.int16).tobytes()
 
     try:
         stt_start = time.perf_counter()
-        if hasattr(indic_conformer_stt, "_load_model"):
-            indic_conformer_stt._load_model()
-        indic_conformer_stt.transcribe(silent_audio, sample_rate)
+        stt_model = indic_conformer_stt._load_model()
+
+        import torch
+
+        silent_waveform = torch.from_numpy(
+            np.zeros(int(sample_rate * 0.5), dtype=np.float32)
+        ).float().unsqueeze(0)
+        with torch.no_grad():
+            stt_model(
+                silent_waveform,
+                Config.INDIC_CONFORMER_LANGUAGE,
+                indic_conformer_stt.DEFAULT_DECODING,
+            )
         logger.info("IndicConformer warmup completed in %.2fs", time.perf_counter() - stt_start)
     except Exception as error:
-        logger.warning("IndicConformer warmup failed: %s", error)
+        logger.error("IndicConformer warmup failed: %s", error)
+        return False
 
     try:
         qwen_start = time.perf_counter()
-        qwen3_triage.triage("hello", "Warmup")
+        response = requests.post(
+            f"{Config.OLLAMA_HOST.rstrip('/')}/api/generate",
+            json={
+                "model": qwen3_triage.MODEL_NAME,
+                "prompt": "hello",
+                "stream": False,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
         logger.info("Qwen3 warmup completed in %.2fs", time.perf_counter() - qwen_start)
-    except Exception as error:
-        logger.warning("Qwen3 warmup failed: %s", error)
+    except requests.RequestException as error:
+        logger.error("Qwen3 warmup failed: %s", error)
+        return False
 
     _MODELS_WARMED_UP = True
     logger.info("Production model warmup finished in %.2fs", time.perf_counter() - warmup_start)
+    return True
+
+
+def warmup_models() -> None:
+    """Backward-compatible wrapper for startup model verification."""
+    if not load_models():
+        raise RuntimeError("Model warmup failed")
 
 
 def _empty_event(transcript: str, reasoning: str) -> EventDict:

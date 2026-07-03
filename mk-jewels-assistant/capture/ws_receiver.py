@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import sys
 import threading
@@ -16,6 +17,7 @@ from alerting.console_alert import AlertManager
 from config import Config
 from core.exceptions import PipelineError
 from core.logger import get_logger
+from core.readiness import is_ready
 from pipeline.session import TRIAGE_FN, Session
 from scoring.session_scoring import generate_and_save_session_score
 from storage.db import Database
@@ -150,6 +152,21 @@ class WebSocketAudioServer:
             await asyncio.Future()
 
     async def _handle_connection(self, websocket):
+        if not is_ready():
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "not_ready",
+                        "message": (
+                            "Server is loading models, please wait and reconnect "
+                            "in 30 seconds"
+                        ),
+                    }
+                )
+            )
+            await websocket.close()
+            return
+
         salesperson_name, store_id, store_name = self._session_context_from_path(
             websocket.request.path
         )
