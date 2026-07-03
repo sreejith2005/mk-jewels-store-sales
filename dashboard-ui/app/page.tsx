@@ -331,7 +331,6 @@ async function deleteSession(apiCall: ApiCall, sessionId: string) {
       credentials: "include",
       headers: {
         Accept: "application/json",
-        ...basicAuthHeader(),
       },
     },
   );
@@ -533,6 +532,7 @@ function buildSalespersonSummary(
 }
 
 async function loadLastAlertTimes(
+  apiCall: ApiCall,
   sessions: Session[],
   salespersons: Salesperson[],
 ): Promise<Record<number, string | null>> {
@@ -547,7 +547,7 @@ async function loadLastAlertTimes(
         return [salesperson.id, null] as const;
       }
 
-      const events = await fetchEvents(session.session_id);
+      const events = await fetchEvents(apiCall, session.session_id);
       const alert = events.find((event) =>
         ["medium", "high"].includes(normalizePriority(event.alert_priority)),
       );
@@ -583,6 +583,13 @@ function useIstTime() {
 }
 
 export default function Page() {
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [managerToken, setManagerToken] = useState<string | null>(null);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [view, setView] = useState<DashboardView>("stores");
   const [stores, setStores] = useState<Store[]>([]);
   const [allSessions, setAllSessions] = useState<Session[]>([]);
@@ -613,14 +620,102 @@ export default function Page() {
   const [, setLastUpdated] = useState<Date | null>(null);
   const renderedEventIdsRef = useRef<Set<string>>(new Set());
 
+  useEffect(() => {
+    const storedValue = window.localStorage.getItem(MANAGER_TOKEN_STORAGE_KEY);
+    if (!storedValue) {
+      setIsAuthReady(true);
+      return;
+    }
+
+    try {
+      const stored = JSON.parse(storedValue) as StoredManagerToken;
+      if (stored.token && stored.expires > Date.now()) {
+        setManagerToken(stored.token);
+        setIsLoggedIn(true);
+      } else {
+        window.localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+      }
+    } catch {
+      window.localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+    } finally {
+      setIsAuthReady(true);
+    }
+  }, []);
+
+  const signOut = useCallback(() => {
+    window.localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+    setIsLoggedIn(false);
+    setManagerToken(null);
+    setIsSettingsOpen(false);
+  }, []);
+
+  const apiCall = useCallback<ApiCall>(
+    (url, options = {}) => {
+      const headers = new Headers(options.headers);
+      if (managerToken) {
+        headers.set("X-Manager-Token", managerToken);
+      }
+
+      return fetch(url, {
+        ...options,
+        headers,
+      });
+    },
+    [managerToken],
+  );
+
+  const submitLogin = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSigningIn(true);
+    setLoginError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/manager`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: loginPassword }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        success?: boolean;
+        token?: string;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !payload?.success || !payload.token) {
+        setLoginError(
+          response.status === 429
+            ? "Too many attempts, try again in 5 minutes"
+            : payload?.error ?? "Invalid password",
+        );
+        return;
+      }
+
+      const stored: StoredManagerToken = {
+        token: payload.token,
+        expires: Date.now() + MANAGER_TOKEN_TTL_MS,
+      };
+      window.localStorage.setItem(MANAGER_TOKEN_STORAGE_KEY, JSON.stringify(stored));
+      setManagerToken(payload.token);
+      setIsLoggedIn(true);
+      setLoginPassword("");
+    } catch {
+      setLoginError("Could not reach the dashboard API");
+    } finally {
+      setIsSigningIn(false);
+    }
+  }, [loginPassword]);
+
   const loadStores = useCallback(async () => {
     setError(null);
     setIsLoadingStores(true);
 
     try {
       const [nextStores, nextSessions] = await Promise.all([
-        fetchStores(),
-        fetchSessions(),
+        fetchStores(apiCall),
+        fetchSessions(apiCall),
       ]);
 
       setStores(nextStores);
@@ -638,10 +733,10 @@ export default function Page() {
 
     try {
       const [nextSalespersons, nextSessions] = await Promise.all([
-        fetchStoreSalespersons(store.id),
-        fetchSessions(store.id),
+        fetchStoreSalespersons(apiCall, store.id),
+        fetchSessions(apiCall, store.id),
       ]);
-      const lastAlertTimes = await loadLastAlertTimes(nextSessions, nextSalespersons);
+      const lastAlertTimes = await loadLastAlertTimes(apiCall, nextSessions, nextSalespersons);
 
       setSalespersons(nextSalespersons);
       setStoreSessions(nextSessions);
@@ -664,7 +759,7 @@ export default function Page() {
     } finally {
       setIsLoadingSalespersons(false);
     }
-  }, []);
+  }, [apiCall]);
 
   const refreshStoreSessions = useCallback(async (store: Store) => {
     if (salespersons.length === 0) {
@@ -672,8 +767,8 @@ export default function Page() {
     }
 
     try {
-      const nextSessions = await fetchSessions(store.id);
-      const lastAlertTimes = await loadLastAlertTimes(nextSessions, salespersons);
+      const nextSessions = await fetchSessions(apiCall, store.id);
+      const lastAlertTimes = await loadLastAlertTimes(apiCall, nextSessions, salespersons);
 
       setStoreSessions(nextSessions);
       setAllSessions((previous) => {
@@ -697,7 +792,7 @@ export default function Page() {
         loadError instanceof Error ? loadError.message : "Session refresh failed",
       );
     }
-  }, [salespersons]);
+  }, [apiCall, salespersons]);
 
   const loadConversation = useCallback(async () => {
     if (!selectedStore || !selectedSalesperson) {
@@ -708,7 +803,7 @@ export default function Page() {
     setIsLoadingConversation(true);
 
     try {
-      const nextSessions = await fetchSessions(selectedStore.id);
+      const nextSessions = await fetchSessions(apiCall, selectedStore.id);
       const nextSelectedSession = selectedSession
         ? nextSessions.find(
           (session) => session.session_id === selectedSession.session_id,
@@ -730,8 +825,8 @@ export default function Page() {
       }
 
       const [nextEvents, nextStats] = await Promise.all([
-        fetchEvents(nextSelectedSession.session_id),
-        fetchStats(nextSelectedSession.session_id),
+        fetchEvents(apiCall, nextSelectedSession.session_id),
+        fetchStats(apiCall, nextSelectedSession.session_id),
       ]);
 
       setEvents((previous) => {
@@ -748,7 +843,7 @@ export default function Page() {
     } finally {
       setIsLoadingConversation(false);
     }
-  }, [selectedSalesperson, selectedSession, selectedStore, sessionSelectionPaused]);
+  }, [apiCall, selectedSalesperson, selectedSession, selectedStore, sessionSelectionPaused]);
 
   const loadSelectedSessionScore = useCallback(async () => {
     if (!selectedSession) {
@@ -759,7 +854,7 @@ export default function Page() {
 
     setIsLoadingSessionScore(true);
     try {
-      const score = await fetchSessionScore(selectedSession.session_id);
+      const score = await fetchSessionScore(apiCall, selectedSession.session_id);
       setSessionScore(score);
       setSessionScoreError(null);
     } catch {
@@ -767,7 +862,7 @@ export default function Page() {
     } finally {
       setIsLoadingSessionScore(false);
     }
-  }, [selectedSession]);
+  }, [apiCall, selectedSession]);
 
   const generateSelectedSessionScore = useCallback(async () => {
     if (!selectedSession) {
@@ -777,7 +872,7 @@ export default function Page() {
     setIsGeneratingSessionScore(true);
     setSessionScoreError(null);
     try {
-      const score = await generateSessionScore(selectedSession.session_id);
+      const score = await generateSessionScore(apiCall, selectedSession.session_id);
       setSessionScore(score);
     } catch (generateError) {
       const message = generateError instanceof Error
@@ -791,23 +886,31 @@ export default function Page() {
     } finally {
       setIsGeneratingSessionScore(false);
     }
-  }, [selectedSession]);
+  }, [apiCall, selectedSession]);
 
   useEffect(() => {
+    if (!isLoggedIn || !managerToken) {
+      return;
+    }
+
     const initialRefresh = window.setTimeout(() => void loadStores(), 0);
 
     return () => {
       window.clearTimeout(initialRefresh);
     };
-  }, [loadStores]);
+  }, [isLoggedIn, loadStores, managerToken]);
 
   useEffect(() => {
+    if (!isLoggedIn || !managerToken) {
+      return;
+    }
+
     const timeout = window.setTimeout(() => void loadSelectedSessionScore(), 0);
     return () => window.clearTimeout(timeout);
-  }, [loadSelectedSessionScore]);
+  }, [isLoggedIn, loadSelectedSessionScore, managerToken]);
 
   useEffect(() => {
-    if (!selectedStore || selectedSalesperson) {
+    if (!isLoggedIn || !managerToken || !selectedStore || selectedSalesperson) {
       return;
     }
 
@@ -819,19 +922,19 @@ export default function Page() {
     return () => {
       window.clearTimeout(initialRefresh);
     };
-  }, [loadSalespersons, selectedSalesperson, selectedStore]);
+  }, [isLoggedIn, loadSalespersons, managerToken, selectedSalesperson, selectedStore]);
 
   useEffect(() => {
-    if (!selectedStore || salespersons.length === 0) {
+    if (!isLoggedIn || !managerToken || !selectedStore || salespersons.length === 0) {
       return;
     }
 
     const interval = window.setInterval(() => void refreshStoreSessions(selectedStore), REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [refreshStoreSessions, salespersons.length, selectedStore]);
+  }, [isLoggedIn, managerToken, refreshStoreSessions, salespersons.length, selectedStore]);
 
   useEffect(() => {
-    if (!selectedStore || !selectedSalesperson) {
+    if (!isLoggedIn || !managerToken || !selectedStore || !selectedSalesperson) {
       return;
     }
 
@@ -842,7 +945,7 @@ export default function Page() {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [loadConversation, selectedSalesperson, selectedStore]);
+  }, [isLoggedIn, loadConversation, managerToken, selectedSalesperson, selectedStore]);
 
   const storeActiveCounts = useMemo(() => {
     const counts = new Map<number, number>();
@@ -860,7 +963,7 @@ export default function Page() {
 
   const saveFeedback = useCallback(
     async (eventId: number, feedback: FeedbackValue) => {
-      const response = await fetch(`${API_BASE}/api/feedback/${eventId}`, {
+      const response = await apiCall(`${API_BASE}/api/feedback/${eventId}`, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -880,7 +983,7 @@ export default function Page() {
         ),
       );
     },
-    [],
+    [apiCall],
   );
 
   const selectSession = useCallback(async (session: Session) => {
@@ -891,8 +994,8 @@ export default function Page() {
 
     try {
       const [nextEvents, nextStats] = await Promise.all([
-        fetchEvents(session.session_id),
-        fetchStats(session.session_id),
+        fetchEvents(apiCall, session.session_id),
+        fetchStats(apiCall, session.session_id),
       ]);
 
       const sortedEvents = sortEventsChronologically(nextEvents);
@@ -907,11 +1010,11 @@ export default function Page() {
     } finally {
       setIsLoadingConversation(false);
     }
-  }, []);
+  }, [apiCall]);
 
   const removeDeletedSession = useCallback(
     async (sessionId: string) => {
-      await deleteSession(sessionId);
+      await deleteSession(apiCall, sessionId);
 
       setAllSessions((previous) =>
         previous.filter((session) => session.session_id !== sessionId),
@@ -931,7 +1034,7 @@ export default function Page() {
         setLastUpdated(new Date());
       }
     },
-    [selectedSession],
+    [apiCall, selectedSession],
   );
 
   const selectStore = (store: Store) => {
@@ -1046,17 +1149,73 @@ export default function Page() {
     (session) => isToday(session.start_time) && isActiveSession(session),
   ).length;
 
+  if (!isAuthReady) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--mk-dark)] text-[var(--mk-text-on-dark)]">
+        <div className="text-sm text-zinc-500">Loading dashboard</div>
+      </main>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[var(--mk-dark)] px-4 text-[var(--mk-text-on-dark)]">
+        <form
+          onSubmit={submitLogin}
+          className="flex w-full max-w-sm flex-col items-stretch gap-5 rounded-lg border border-white/10 bg-[var(--mk-surface)] p-6 shadow-2xl shadow-black/30"
+        >
+          <div className="relative mx-auto h-16 w-56 overflow-hidden rounded-md border border-[var(--mk-gold)]/20 bg-black">
+            <Image
+              src="/brand/mk-jewels-dark.jpeg"
+              alt="MK Jewels"
+              fill
+              sizes="224px"
+              className="object-contain"
+              priority
+            />
+          </div>
+          <div className="text-center">
+            <h1 className="font-heading text-3xl font-semibold text-zinc-50">
+              Manager Dashboard
+            </h1>
+          </div>
+          <input
+            value={loginPassword}
+            onChange={(event) => setLoginPassword(event.target.value)}
+            placeholder="Enter password"
+            type="password"
+            className="h-12 rounded-lg border border-white/10 bg-black/30 px-4 text-base text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[var(--mk-gold)]/65 focus:ring-2 focus:ring-[var(--mk-gold)]/15"
+            autoComplete="current-password"
+            autoFocus
+          />
+          <Button
+            type="submit"
+            disabled={isSigningIn || !loginPassword}
+            className="min-h-12 bg-[var(--mk-gold)] text-base font-semibold text-[var(--mk-dark)] hover:bg-[var(--mk-gold-light)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSigningIn ? "Signing In" : "Sign In"}
+          </Button>
+          <div className="min-h-5 text-center text-sm text-red-300">
+            {loginError}
+          </div>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen overflow-x-hidden bg-[var(--mk-dark)] text-[var(--mk-text-on-dark)]">
       <div className="flex min-h-screen w-full flex-col lg:flex-row">
         <DashboardSidebar
           activeSessions={activeSessions}
           activeView={view}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onSelectAlerts={openAlerts}
           onSelectPinManagement={openPinManagement}
           onSelectReports={openReports}
           onSelectScores={openScores}
           onSelectStores={backToStores}
+          onSignOut={signOut}
           selectedSalesperson={selectedSalesperson}
           selectedStore={selectedStore}
         />
@@ -1078,13 +1237,13 @@ export default function Page() {
             ) : null}
 
             {view === "pin-management" ? (
-              <PinManagementView stores={stores} />
+              <PinManagementView apiCall={apiCall} stores={stores} />
             ) : view === "reports" ? (
-              <ReportsView stores={stores} />
+              <ReportsView apiCall={apiCall} stores={stores} />
             ) : view === "alerts" ? (
-              <AlertsView />
+              <AlertsView apiCall={apiCall} />
             ) : view === "scores" ? (
-              <ScoresView stores={stores} />
+              <ScoresView apiCall={apiCall} stores={stores} />
             ) : !selectedStore ? (
               <StoreSelection
                 activeCounts={storeActiveCounts}
@@ -1123,6 +1282,13 @@ export default function Page() {
           </div>
         </div>
       </div>
+      {isSettingsOpen ? (
+        <ManagerSettingsPanel
+          apiCall={apiCall}
+          onClose={() => setIsSettingsOpen(false)}
+          onPasswordChanged={signOut}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1130,21 +1296,25 @@ export default function Page() {
 function DashboardSidebar({
   activeSessions,
   activeView,
+  onOpenSettings,
   onSelectAlerts,
   onSelectPinManagement,
   onSelectReports,
   onSelectScores,
   onSelectStores,
+  onSignOut,
   selectedSalesperson,
   selectedStore,
 }: {
   activeSessions: number;
   activeView: DashboardView;
+  onOpenSettings: () => void;
   onSelectAlerts: () => void;
   onSelectPinManagement: () => void;
   onSelectReports: () => void;
   onSelectScores: () => void;
   onSelectStores: () => void;
+  onSignOut: () => void;
   selectedSalesperson: Salesperson | null;
   selectedStore: Store | null;
 }) {
@@ -1202,7 +1372,7 @@ function DashboardSidebar({
           ))}
         </nav>
 
-        <div className="mt-auto hidden rounded-lg border border-[var(--mk-gold)]/15 bg-[var(--mk-surface)] p-4 lg:block">
+        <div className="mt-auto rounded-lg border border-[var(--mk-gold)]/15 bg-[var(--mk-surface)] p-4">
           <p className="text-xs uppercase tracking-[0.18em] text-[var(--mk-gold)]">
             Current View
           </p>
@@ -1220,6 +1390,24 @@ function DashboardSidebar({
           <p className="mt-1 text-xs leading-5 text-zinc-500">
             Live monitoring for sales floor conversations and manager feedback.
           </p>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 text-xs font-medium text-zinc-300 transition hover:border-[var(--mk-gold)]/40 hover:bg-[var(--mk-gold)]/10 hover:text-[var(--mk-gold-light)]"
+            >
+              <Settings className="size-3.5" />
+              Settings
+            </button>
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 text-xs font-medium text-zinc-300 transition hover:border-[var(--mk-danger)]/35 hover:bg-[var(--mk-danger)]/10 hover:text-red-100"
+            >
+              <LogOut className="size-3.5" />
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -1459,7 +1647,7 @@ function SalespersonSelection({
   );
 }
 
-function AlertsView() {
+function AlertsView({ apiCall }: { apiCall: ApiCall }) {
   const [alerts, setAlerts] = useState<AlertLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1469,13 +1657,13 @@ function AlertsView() {
     setLoadError(null);
 
     try {
-      setAlerts(await fetchAlertsLog());
+      setAlerts(await fetchAlertsLog(apiCall));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Alerts refresh failed");
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [apiCall]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => void loadAlerts(), 0);
@@ -1557,7 +1745,7 @@ function AlertsView() {
   );
 }
 
-function ReportsView({ stores }: { stores: Store[] }) {
+function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
   const [allSalespersons, setAllSalespersons] = useState<Salesperson[]>([]);
   const [selectedName, setSelectedName] = useState("");
   const [reports, setReports] = useState<CoachingReport[]>([]);
@@ -1575,7 +1763,7 @@ function ReportsView({ stores }: { stores: Store[] }) {
     setIsLoadingSalespersons(true);
     setLoadError(null);
 
-    Promise.all(stores.map((store) => fetchStoreSalespersons(store.id)))
+    Promise.all(stores.map((store) => fetchStoreSalespersons(apiCall, store.id)))
       .then((salespersonGroups) => {
         if (!cancelled) {
           setAllSalespersons(salespersonGroups.flat());
@@ -1595,7 +1783,7 @@ function ReportsView({ stores }: { stores: Store[] }) {
     return () => {
       cancelled = true;
     };
-  }, [stores]);
+  }, [apiCall, stores]);
 
   useEffect(() => {
     if (!selectedName) {
@@ -1607,7 +1795,7 @@ function ReportsView({ stores }: { stores: Store[] }) {
     setIsLoadingReports(true);
     setLoadError(null);
 
-    fetchReports(selectedName)
+    fetchReports(apiCall, selectedName)
       .then((nextReports) => {
         if (!cancelled) {
           setReports([...nextReports].sort((first, second) => {
@@ -1631,7 +1819,7 @@ function ReportsView({ stores }: { stores: Store[] }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedName]);
+  }, [apiCall, selectedName]);
 
   return (
     <section className="flex flex-col gap-5">
@@ -1701,7 +1889,7 @@ function ReportsView({ stores }: { stores: Store[] }) {
   );
 }
 
-function ScoresView({ stores }: { stores: Store[] }) {
+function ScoresView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
   const [selectedStoreId, setSelectedStoreId] = useState<number | "">(
     stores[0]?.id ?? "",
   );
@@ -1720,7 +1908,7 @@ function ScoresView({ stores }: { stores: Store[] }) {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
-    fetchStoreLeaderboard(Number(effectiveStoreId))
+    fetchStoreLeaderboard(apiCall, Number(effectiveStoreId))
       .then((rows) => {
         if (!cancelled) {
           setLeaderboard(rows);
@@ -1740,7 +1928,7 @@ function ScoresView({ stores }: { stores: Store[] }) {
     return () => {
       cancelled = true;
     };
-  }, [effectiveStoreId]);
+  }, [apiCall, effectiveStoreId]);
 
   const toggleSalesperson = async (name: string) => {
     if (expandedName === name) {
@@ -1754,7 +1942,7 @@ function ScoresView({ stores }: { stores: Store[] }) {
     }
 
     try {
-      const scores = await fetchSalespersonScores(name, 90);
+      const scores = await fetchSalespersonScores(apiCall, name, 90);
       setSalespersonScores((previous) => ({ ...previous, [name]: scores }));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Salesperson scores failed to load");
@@ -1936,7 +2124,7 @@ function TrendBadge({ trend }: { trend: number }) {
   );
 }
 
-function PinManagementView({ stores }: { stores: Store[] }) {
+function PinManagementView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
   const [selectedStoreId, setSelectedStoreId] = useState<string>("all");
   const [pinSalespersons, setPinSalespersons] = useState<Salesperson[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1954,8 +2142,8 @@ function PinManagementView({ stores }: { stores: Store[] }) {
 
     try {
       const nextSalespersons = selectedStoreId === "all"
-        ? (await Promise.all(stores.map((store) => fetchStoreSalespersons(store.id)))).flat()
-        : await fetchStoreSalespersons(Number(selectedStoreId));
+        ? (await Promise.all(stores.map((store) => fetchStoreSalespersons(apiCall, store.id)))).flat()
+        : await fetchStoreSalespersons(apiCall, Number(selectedStoreId));
 
       setPinSalespersons(nextSalespersons);
     } catch (loadSalespersonsError) {
@@ -1967,7 +2155,7 @@ function PinManagementView({ stores }: { stores: Store[] }) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedStoreId, stores]);
+  }, [apiCall, selectedStoreId, stores]);
 
   useEffect(() => {
     if (stores.length === 0) {
@@ -1980,7 +2168,7 @@ function PinManagementView({ stores }: { stores: Store[] }) {
   }, [loadPinSalespersons, stores.length]);
 
   const savePin = async (salespersonId: number, pin: string) => {
-    await setSalespersonPin(salespersonId, pin);
+    await setSalespersonPin(apiCall, salespersonId, pin);
     setPinSalespersons((previous) =>
       previous.map((salesperson) =>
         salesperson.id === salespersonId ? { ...salesperson, pin_set: true } : salesperson,
@@ -2812,6 +3000,144 @@ function TranscriptCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function ManagerSettingsPanel({
+  apiCall,
+  onClose,
+  onPasswordChanged,
+}: {
+  apiCall: ApiCall;
+  onClose: () => void;
+  onPasswordChanged: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const savePassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatusMessage(null);
+    setErrorMessage(null);
+
+    if (!newPassword.trim()) {
+      setErrorMessage("New password is required");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setErrorMessage("Passwords do not match");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await apiCall(`${API_BASE}/api/auth/manager/change-password`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        success?: boolean;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !payload?.success) {
+        setErrorMessage(payload?.error ?? "Password change failed");
+        return;
+      }
+
+      setStatusMessage("Password changed");
+      window.setTimeout(onPasswordChanged, 900);
+    } catch {
+      setErrorMessage("Could not reach the dashboard API");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+      <form
+        onSubmit={savePassword}
+        className="w-full max-w-md rounded-lg border border-white/10 bg-[var(--mk-surface)] p-5 shadow-2xl shadow-black/40"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--mk-gold)]">
+              Settings
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-zinc-50">
+              Change Password
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-400 transition hover:bg-white/[0.04] hover:text-zinc-100"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <input
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            placeholder="Current password"
+            type="password"
+            className="h-11 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[var(--mk-gold)]/60 focus:ring-2 focus:ring-[var(--mk-gold)]/15"
+            autoComplete="current-password"
+          />
+          <input
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            placeholder="New password"
+            type="password"
+            className="h-11 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[var(--mk-gold)]/60 focus:ring-2 focus:ring-[var(--mk-gold)]/15"
+            autoComplete="new-password"
+          />
+          <input
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder="Confirm new password"
+            type="password"
+            className="h-11 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-[var(--mk-gold)]/60 focus:ring-2 focus:ring-[var(--mk-gold)]/15"
+            autoComplete="new-password"
+          />
+        </div>
+
+        {errorMessage ? (
+          <div className="mt-4 rounded-lg border border-[var(--mk-danger)]/25 bg-[var(--mk-danger)]/10 p-3 text-sm text-red-100">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        {statusMessage ? (
+          <div className="mt-4 rounded-lg border border-[var(--mk-success)]/25 bg-[var(--mk-success)]/10 p-3 text-sm text-emerald-100">
+            {statusMessage}
+          </div>
+        ) : null}
+
+        <Button
+          type="submit"
+          disabled={isSaving}
+          className="mt-5 min-h-11 w-full bg-[var(--mk-gold)] font-semibold text-[var(--mk-dark)] hover:bg-[var(--mk-gold-light)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSaving ? "Saving" : "Save"}
+        </Button>
+      </form>
+    </div>
   );
 }
 

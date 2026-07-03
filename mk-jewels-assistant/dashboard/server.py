@@ -387,15 +387,7 @@ def _extract_manager_token() -> str | None:
 
 def _has_valid_manager_auth() -> bool:
     token = _extract_manager_token()
-    if token and token in _manager_token_set:
-        return True
-
-    auth = request.authorization
-    return bool(
-        auth
-        and secrets.compare_digest(auth.username or "", Config.DASHBOARD_AUTH_USER)
-        and secrets.compare_digest(auth.password or "", Config.DASHBOARD_AUTH_PASS)
-    )
+    return bool(token and token in _manager_token_set)
 
 
 def _add_manager_token() -> str:

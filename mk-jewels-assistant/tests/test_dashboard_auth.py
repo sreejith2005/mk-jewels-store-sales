@@ -1,5 +1,3 @@
-import base64
-
 import pytest
 
 from dashboard import server
@@ -13,6 +11,9 @@ def dashboard_client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "db", test_db)
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_USER", "admin")
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
+    server._manager_tokens.clear()
+    server._manager_token_set.clear()
+    server._manager_failed_attempts.clear()
 
     try:
         yield server.app.test_client(), test_db
@@ -45,9 +46,10 @@ def _seed_salesperson(db: Database) -> int:
         return cursor.lastrowid
 
 
-def _basic_auth_header() -> dict[str, str]:
-    token = base64.b64encode(b"admin:secret").decode("ascii")
-    return {"Authorization": f"Basic {token}"}
+def _manager_token_header(client) -> dict[str, str]:
+    response = client.post("/api/auth/manager", json={"password": "secret"})
+    token = response.get_json()["token"]
+    return {"X-Manager-Token": token}
 
 
 def test_salesperson_auth_route_skips_dashboard_basic_auth(dashboard_client):
@@ -127,7 +129,7 @@ def test_first_pin_setup_rejects_when_pin_already_exists(dashboard_client):
     assert db.verify_salesperson_pin(salesperson_id, "2468") is False
 
 
-def test_admin_set_pin_requires_basic_auth(dashboard_client):
+def test_admin_set_pin_requires_manager_token(dashboard_client):
     client, db = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
@@ -137,7 +139,7 @@ def test_admin_set_pin_requires_basic_auth(dashboard_client):
     )
     authorized = client.post(
         "/api/admin/set_pin",
-        headers=_basic_auth_header(),
+        headers=_manager_token_header(client),
         json={"salesperson_id": salesperson_id, "pin": "4321"},
     )
 
@@ -153,7 +155,7 @@ def test_admin_set_pin_rejects_non_four_digit_pin(dashboard_client):
 
     response = client.post(
         "/api/admin/set_pin",
-        headers=_basic_auth_header(),
+        headers=_manager_token_header(client),
         json={"salesperson_id": salesperson_id, "pin": "12345"},
     )
 

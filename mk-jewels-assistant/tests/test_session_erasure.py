@@ -1,5 +1,3 @@
-import base64
-
 import pytest
 
 from dashboard import server
@@ -13,6 +11,9 @@ def dashboard_client(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "db", test_db)
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_USER", "admin")
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
+    server._manager_tokens.clear()
+    server._manager_token_set.clear()
+    server._manager_failed_attempts.clear()
 
     try:
         yield server.app.test_client(), test_db
@@ -21,9 +22,10 @@ def dashboard_client(tmp_path, monkeypatch):
         monkeypatch.setattr(server, "db", original_db)
 
 
-def _basic_auth_header() -> dict[str, str]:
-    token = base64.b64encode(b"admin:secret").decode("ascii")
-    return {"Authorization": f"Basic {token}"}
+def _manager_token_header(client) -> dict[str, str]:
+    response = client.post("/api/auth/manager", json={"password": "secret"})
+    token = response.get_json()["token"]
+    return {"X-Manager-Token": token}
 
 
 def test_delete_session_with_valid_auth_returns_success(dashboard_client):
@@ -33,7 +35,7 @@ def test_delete_session_with_valid_auth_returns_success(dashboard_client):
 
     response = client.delete(
         f"/api/sessions/{session_id}",
-        headers=_basic_auth_header(),
+        headers=_manager_token_header(client),
     )
 
     assert response.status_code == 200
@@ -49,7 +51,7 @@ def test_delete_missing_session_with_valid_auth_returns_404(dashboard_client):
 
     response = client.delete(
         "/api/sessions/missing-session",
-        headers=_basic_auth_header(),
+        headers=_manager_token_header(client),
     )
 
     assert response.status_code == 404
@@ -80,7 +82,7 @@ def test_events_api_returns_raw_display_and_compatible_transcript(dashboard_clie
 
     response = client.get(
         f"/api/events/{session_id}",
-        headers=_basic_auth_header(),
+        headers=_manager_token_header(client),
     )
     payload = response.get_json()
 
