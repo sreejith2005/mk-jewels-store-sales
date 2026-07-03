@@ -589,6 +589,7 @@ export default function Page() {
   const [sessionSelectionPaused, setSessionSelectionPaused] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [sessionScore, setSessionScore] = useState<SessionScore | null>(null);
+  const [sessionScoreError, setSessionScoreError] = useState<string | null>(null);
   const [, setIsLoadingSessionScore] = useState(false);
   const [isGeneratingSessionScore, setIsGeneratingSessionScore] = useState(false);
   const [savedFeedbackIds, setSavedFeedbackIds] = useState<Set<number>>(
@@ -742,6 +743,7 @@ export default function Page() {
   const loadSelectedSessionScore = useCallback(async () => {
     if (!selectedSession) {
       setSessionScore(null);
+      setSessionScoreError(null);
       return;
     }
 
@@ -749,6 +751,7 @@ export default function Page() {
     try {
       const score = await fetchSessionScore(selectedSession.session_id);
       setSessionScore(score);
+      setSessionScoreError(null);
     } catch {
       setSessionScore(null);
     } finally {
@@ -762,13 +765,18 @@ export default function Page() {
     }
 
     setIsGeneratingSessionScore(true);
-    setError(null);
+    setSessionScoreError(null);
     try {
       const score = await generateSessionScore(selectedSession.session_id);
       setSessionScore(score);
     } catch (generateError) {
-      setError(
-        generateError instanceof Error ? generateError.message : "Score generation failed",
+      const message = generateError instanceof Error
+        ? generateError.message
+        : "Score generation failed";
+      setSessionScoreError(
+        message === "Failed to fetch"
+          ? "Could not reach the score API. Check that the backend was pulled and restarted."
+          : message,
       );
     } finally {
       setIsGeneratingSessionScore(false);
@@ -909,6 +917,7 @@ export default function Page() {
         setEvents([]);
         setStats(emptyStats);
         setSessionScore(null);
+        setSessionScoreError(null);
         setLastUpdated(new Date());
       }
     },
@@ -925,6 +934,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
   };
 
@@ -936,6 +946,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
   };
 
@@ -951,6 +962,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
     void loadStores();
   };
@@ -970,6 +982,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
     setError(null);
   };
@@ -984,6 +997,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
     setError(null);
   };
@@ -998,6 +1012,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
     setError(null);
   };
@@ -1010,6 +1025,7 @@ export default function Page() {
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
+    setSessionScoreError(null);
     setLastUpdated(null);
     if (selectedStore) {
       void loadSalespersons(selectedStore);
@@ -1085,6 +1101,7 @@ export default function Page() {
                 savedFeedbackIds={savedFeedbackIds}
                 salesperson={selectedSalesperson}
                 sessionScore={sessionScore}
+                sessionScoreError={sessionScoreError}
                 selectedSession={selectedSession}
                 isGeneratingSessionScore={isGeneratingSessionScore}
                 onGenerateSessionScore={generateSelectedSessionScore}
@@ -2218,6 +2235,7 @@ function ConversationView({
   savedFeedbackIds,
   salesperson,
   sessionScore,
+  sessionScoreError,
   selectedSession,
   isGeneratingSessionScore,
   stats,
@@ -2233,6 +2251,7 @@ function ConversationView({
   savedFeedbackIds: Set<number>;
   salesperson: Salesperson;
   sessionScore: SessionScore | null;
+  sessionScoreError: string | null;
   selectedSession: Session | null;
   isGeneratingSessionScore: boolean;
   stats: Stats;
@@ -2481,6 +2500,7 @@ function ConversationView({
               className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]"
             >
               <SessionScoreCard
+                error={sessionScoreError}
                 isGenerating={isGeneratingSessionScore}
                 onGenerate={onGenerateSessionScore}
                 score={sessionScore}
@@ -2524,11 +2544,13 @@ function ConversationView({
 }
 
 function SessionScoreCard({
+  error,
   isGenerating,
   onGenerate,
   score,
   selectedSession,
 }: {
+  error: string | null;
   isGenerating: boolean;
   onGenerate: () => Promise<void>;
   score: SessionScore | null;
@@ -2559,6 +2581,12 @@ function SessionScoreCard({
           {isGenerating ? "Generating" : "Generate Score Now"}
         </Button>
       </div>
+
+      {error ? (
+        <div className="mt-3 rounded-lg border border-[var(--mk-danger)]/25 bg-[var(--mk-danger)]/10 p-3 text-sm text-red-100">
+          {error}
+        </div>
+      ) : null}
 
       {score ? (
         <>
