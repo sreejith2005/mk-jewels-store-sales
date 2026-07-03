@@ -62,7 +62,10 @@ SYSTEM_PROMPT = (
     "Your job is to transcribe the conversation accurately and then analyze it for signals "
     "that a sales manager should know about. Jewelry-specific terms you will encounter include: "
     "hallmark, BIS, HUID, carat, VVS, solitaire, kundan, polki, making charges, exchange scheme, "
-    "IGI, GIA, solitaire, rhodium. Preserve these terms exactly as spoken."
+    "IGI, GIA, solitaire, rhodium. Preserve these terms exactly as spoken. "
+    "If the transcript contains Hindi or other Indian language text in Devanagari script, "
+    "transliterate it to Roman script (Hinglish) before returning. Return only Roman script "
+    "text in the transcript field."
 )
 
 USER_PROMPT = (

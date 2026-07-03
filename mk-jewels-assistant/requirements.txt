@@ -19,5 +19,6 @@ torch
 torchaudio
 onnx
 onnxruntime-gpu
+indic-transliteration
 # Optional: diarization (DIARIZATION_ENABLED=true in .env)
 pyannote.audio>=3.1.0
