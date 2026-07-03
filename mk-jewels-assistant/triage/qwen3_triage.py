@@ -73,8 +73,12 @@ CRITICAL_ALERT_CALIBRATION_RULES = (
     "as \"none\".\n\n"
     "4. Closing a deal in a non-scripted way is a POSITIVE outcome. Do not "
     "penalise it.\n\n"
-    "5. When in doubt, classify lower. A false alarm is more damaging to "
-    "manager trust than a missed alert.\n\n"
+    "5. Be appropriately sensitive. If a customer clearly expresses a price "
+    "concern, objection, or buying intent, classify it - even if the "
+    "salesperson responds well. These signals describe the CUSTOMER's state, "
+    "not just the salesperson's failure. objection_detected and price_concern "
+    "describe what the customer said. upsell_miss and knowledge_gap describe "
+    "the salesperson's response.\n\n"
     "6. The reasoning field must state specifically what the salesperson said "
     "vs what the script says, in max 20 words. Do not write vague reasons like "
     "\"did not follow script\"."
@@ -87,8 +91,9 @@ USER_PROMPT_TEMPLATE = (
     "{kb_context}\n"
     "--- END KNOWLEDGE BASE ---\n\n"
     "{calibration_rules}\n\n"
-    "Classify this jewelry sales conversation. Return ONLY a valid JSON object with "
-    "exactly these fields and no other text or markdown fences: "
+    "Classify this jewelry sales conversation. Respond with ONLY the JSON object. "
+    "No explanation, no preamble, no markdown code fences. Maximum response "
+    "length: 150 tokens. Return exactly these fields: "
     "objection_detected (bool), price_concern (bool), certification_question (bool), "
     "upsell_miss (bool), knowledge_gap (bool), intent_signal (bool), "
     "alert_priority (string, one of: none / low / medium / high), "
@@ -206,6 +211,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
     payload = {
         "model": MODEL_NAME,
         "stream": False,
+        "options": {"num_predict": 150, "temperature": 0},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -224,7 +230,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
         response = requests.post(
             f"{Config.OLLAMA_HOST}/api/chat",
             json=payload,
-            timeout=30,
+            timeout=(5, 60),
         )
         response.raise_for_status()
     except requests.RequestException as error:
@@ -233,6 +239,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
 
     response_json = response.json()
     raw_text = response_json["message"]["content"]
+    logger.info("Raw Qwen3 triage response: %s", raw_text)
     result = _parse_json_response(raw_text)
     result["transcript"] = transcript
     return _validate_triage_result(result)

@@ -74,6 +74,11 @@ def main(argv: list[str] | None = None):
 
     Config.validate()
 
+    if Config.PIPELINE_MODE == "production" and run_mode in {"1", "2", "5"}:
+        from transcription.local_pipeline import warmup_models
+
+        warmup_models()
+
     if run_mode == "5":
         asyncio.run(start_live_phone_capture())
         return

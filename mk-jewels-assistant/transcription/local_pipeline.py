@@ -22,6 +22,37 @@ from triage import qwen3_triage
 
 logger = get_logger(__name__)
 DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
+_MODELS_WARMED_UP = False
+
+
+def warmup_models() -> None:
+    """Prime production STT and triage models before the first real audio chunk."""
+    global _MODELS_WARMED_UP
+    if _MODELS_WARMED_UP:
+        return
+
+    warmup_start = time.perf_counter()
+    sample_rate = 16000
+    silent_audio = np.zeros(int(sample_rate * 0.5), dtype=np.int16).tobytes()
+
+    try:
+        stt_start = time.perf_counter()
+        if hasattr(indic_conformer_stt, "_load_model"):
+            indic_conformer_stt._load_model()
+        indic_conformer_stt.transcribe(silent_audio, sample_rate)
+        logger.info("IndicConformer warmup completed in %.2fs", time.perf_counter() - stt_start)
+    except Exception as error:
+        logger.warning("IndicConformer warmup failed: %s", error)
+
+    try:
+        qwen_start = time.perf_counter()
+        qwen3_triage.triage("hello", "Warmup")
+        logger.info("Qwen3 warmup completed in %.2fs", time.perf_counter() - qwen_start)
+    except Exception as error:
+        logger.warning("Qwen3 warmup failed: %s", error)
+
+    _MODELS_WARMED_UP = True
+    logger.info("Production model warmup finished in %.2fs", time.perf_counter() - warmup_start)
 
 
 def _empty_event(transcript: str, reasoning: str) -> EventDict:

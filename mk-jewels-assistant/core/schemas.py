@@ -36,6 +36,12 @@ BOOL_EVENT_KEYS = {
 }
 
 
+def _coerce_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return bool(value)
+
+
 def validate_event(event: dict) -> EventDict:
     """
     Validates that a dict returned by any triage function
@@ -56,12 +62,12 @@ def validate_event(event: dict) -> EventDict:
 
     return {
         "transcript": event["transcript"],
-        "objection_detected": bool(event["objection_detected"]),
-        "price_concern": bool(event["price_concern"]),
-        "certification_question": bool(event["certification_question"]),
-        "upsell_miss": bool(event["upsell_miss"]),
-        "knowledge_gap": bool(event["knowledge_gap"]),
-        "intent_signal": bool(event["intent_signal"]),
+        "objection_detected": _coerce_bool(event["objection_detected"]),
+        "price_concern": _coerce_bool(event["price_concern"]),
+        "certification_question": _coerce_bool(event["certification_question"]),
+        "upsell_miss": _coerce_bool(event["upsell_miss"]),
+        "knowledge_gap": _coerce_bool(event["knowledge_gap"]),
+        "intent_signal": _coerce_bool(event["intent_signal"]),
         "alert_priority": alert_priority,
         "reasoning": event["reasoning"],
     }

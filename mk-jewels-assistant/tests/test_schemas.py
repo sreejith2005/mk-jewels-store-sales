@@ -53,3 +53,18 @@ def test_validate_event_coerces_price_concern_to_false():
     validated = validate_event(event)
 
     assert validated["price_concern"] is False
+
+
+def test_validate_event_coerces_string_booleans():
+    event = valid_event()
+    event["objection_detected"] = "true"
+    event["price_concern"] = "false"
+    event["certification_question"] = "FALSE"
+    event["intent_signal"] = "TRUE"
+
+    validated = validate_event(event)
+
+    assert validated["objection_detected"] is True
+    assert validated["price_concern"] is False
+    assert validated["certification_question"] is False
+    assert validated["intent_signal"] is True
