@@ -589,7 +589,7 @@ export default function Page() {
   const [sessionSelectionPaused, setSessionSelectionPaused] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [sessionScore, setSessionScore] = useState<SessionScore | null>(null);
-  const [isLoadingSessionScore, setIsLoadingSessionScore] = useState(false);
+  const [, setIsLoadingSessionScore] = useState(false);
   const [isGeneratingSessionScore, setIsGeneratingSessionScore] = useState(false);
   const [savedFeedbackIds, setSavedFeedbackIds] = useState<Set<number>>(
     () => new Set(),
@@ -597,9 +597,9 @@ export default function Page() {
   const [stats, setStats] = useState<Stats>(emptyStats);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
   const [isLoadingSalespersons, setIsLoadingSalespersons] = useState(false);
-  const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  const [, setIsLoadingConversation] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [, setLastUpdated] = useState<Date | null>(null);
   const renderedEventIdsRef = useRef<Set<string>>(new Set());
 
   const loadStores = useCallback(async () => {
@@ -1039,7 +1039,6 @@ export default function Page() {
           <DashboardTopbar
             activeSessions={activeSessions}
             activeView={view}
-            lastUpdated={lastUpdated}
             selectedSalesperson={selectedSalesperson}
             selectedSession={selectedSession}
             selectedStore={selectedStore}
@@ -1079,8 +1078,6 @@ export default function Page() {
             ) : (
               <ConversationView
                 events={events}
-                isLoading={isLoadingConversation}
-                lastUpdated={lastUpdated}
                 onBack={backToSalespersons}
                 onDeleteSession={removeDeletedSession}
                 onSaveFeedback={saveFeedback}
@@ -1090,7 +1087,6 @@ export default function Page() {
                 sessionScore={sessionScore}
                 selectedSession={selectedSession}
                 isGeneratingSessionScore={isGeneratingSessionScore}
-                isLoadingSessionScore={isLoadingSessionScore}
                 onGenerateSessionScore={generateSelectedSessionScore}
                 stats={stats}
                 store={selectedStore}
@@ -1206,14 +1202,12 @@ function DashboardSidebar({
 function DashboardTopbar({
   activeSessions,
   activeView,
-  lastUpdated,
   selectedSalesperson,
   selectedSession,
   selectedStore,
 }: {
   activeSessions: number;
   activeView: DashboardView;
-  lastUpdated: Date | null;
   selectedSalesperson: Salesperson | null;
   selectedSession: Session | null;
   selectedStore: Store | null;
@@ -1260,11 +1254,6 @@ function DashboardTopbar({
             <Clock3 className="size-3.5 text-[var(--mk-gold)]" />
             {istTime || "IST"}
           </span>
-          {lastUpdated ? (
-            <span className="inline-flex min-h-9 items-center rounded-full border border-white/10 bg-white/[0.04] px-3">
-              Updated {lastUpdated.toLocaleTimeString()}
-            </span>
-          ) : null}
         </div>
       </div>
     </header>
@@ -2221,8 +2210,6 @@ function PinEditorRow({
 
 function ConversationView({
   events,
-  isLoading,
-  lastUpdated,
   onBack,
   onDeleteSession,
   onSaveFeedback,
@@ -2233,14 +2220,11 @@ function ConversationView({
   sessionScore,
   selectedSession,
   isGeneratingSessionScore,
-  isLoadingSessionScore,
   stats,
   store,
   storeSessions,
 }: {
   events: SessionEvent[];
-  isLoading: boolean;
-  lastUpdated: Date | null;
   onBack: () => void;
   onDeleteSession: (sessionId: string) => Promise<void>;
   onSaveFeedback: (eventId: number, feedback: FeedbackValue) => Promise<void>;
@@ -2251,7 +2235,6 @@ function ConversationView({
   sessionScore: SessionScore | null;
   selectedSession: Session | null;
   isGeneratingSessionScore: boolean;
-  isLoadingSessionScore: boolean;
   stats: Stats;
   store: Store;
   storeSessions: Session[];
@@ -2490,10 +2473,6 @@ function ConversationView({
                     Copy All
                   </Button>
                 ) : null}
-                <span className="text-xs text-zinc-500">
-                  {isLoading ? "Refreshing" : `${events.length} events`}
-                  {lastUpdated ? `, updated ${lastUpdated.toLocaleTimeString()}` : ""}
-                </span>
               </div>
             </div>
 
@@ -2503,7 +2482,6 @@ function ConversationView({
             >
               <SessionScoreCard
                 isGenerating={isGeneratingSessionScore}
-                isLoading={isLoadingSessionScore}
                 onGenerate={onGenerateSessionScore}
                 score={sessionScore}
                 selectedSession={selectedSession}
@@ -2547,13 +2525,11 @@ function ConversationView({
 
 function SessionScoreCard({
   isGenerating,
-  isLoading,
   onGenerate,
   score,
   selectedSession,
 }: {
   isGenerating: boolean;
-  isLoading: boolean;
   onGenerate: () => Promise<void>;
   score: SessionScore | null;
   selectedSession: Session | null;
@@ -2569,7 +2545,7 @@ function SessionScoreCard({
             </p>
           ) : (
             <p className="mt-2 text-sm text-zinc-500">
-              {isLoading ? "Checking score..." : "Score pending..."}
+              {selectedSession ? "Score pending" : "No session selected"}
             </p>
           )}
         </div>
