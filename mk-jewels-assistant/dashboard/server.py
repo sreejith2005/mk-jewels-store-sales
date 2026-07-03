@@ -76,7 +76,10 @@ def get_service_worker():
 @app.get("/api/sessions")
 def get_today_sessions():
     store_id = request.args.get("store_id", type=int)
-    return jsonify(db.get_recent_sessions(store_id=store_id))
+    sessions = db.get_recent_sessions(limit=500, store_id=store_id)
+    for session in sessions:
+        session["event_count"] = len(db.get_session_events(session["session_id"]))
+    return jsonify(sessions)
 
 
 @app.delete("/api/sessions/<session_id>")

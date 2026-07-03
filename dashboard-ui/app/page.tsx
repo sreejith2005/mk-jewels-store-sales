@@ -20,7 +20,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const DASHBOARD_AUTH_USER = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_USER;
 const DASHBOARD_AUTH_PASS = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_PASS;
-const REFRESH_MS = 8000;
+const REFRESH_MS = 2000;
 
 type Store = {
   id: number;
@@ -49,7 +49,8 @@ type Salesperson = {
   created_at?: string;
 };
 
-type DashboardView = "stores" | "pin-management";
+type DashboardView = "stores" | "pin-management" | "reports" | "alerts";
+type ConversationMode = "live" | "full";
 
 type Session = {
   salesperson_name?: string;
@@ -59,6 +60,7 @@ type Session = {
   start_time?: string;
   end_time?: string | null;
   is_active?: boolean;
+  event_count?: number;
 };
 
 type SessionEvent = {
@@ -68,6 +70,31 @@ type SessionEvent = {
   alert_priority?: string;
   reasoning?: string;
   manager_feedback?: FeedbackValue | null;
+};
+
+type AlertLogEntry = {
+  id?: number;
+  timestamp?: string;
+  sent_at?: string;
+  store_name?: string;
+  store?: string;
+  salesperson_name?: string;
+  salesperson?: string;
+  priority?: string;
+  alert_priority?: string;
+  channel?: string;
+  status?: string;
+};
+
+type CoachingReport = {
+  id?: number;
+  report_date?: string;
+  date?: string;
+  salesperson_name?: string;
+  report_text?: string;
+  text?: string;
+  content?: string;
+  created_at?: string;
 };
 
 type FeedbackValue = "useful" | "false_alarm" | "noted";
@@ -194,6 +221,16 @@ function fetchStats(sessionId: string) {
   return fetchJson<Stats>(`${API_BASE}/api/stats/${encodeURIComponent(sessionId)}`);
 }
 
+function fetchAlertsLog() {
+  return fetchJson<AlertLogEntry[]>(`${API_BASE}/api/alerts/log?limit=50`);
+}
+
+function fetchReports(salespersonName: string) {
+  return fetchJson<CoachingReport[]>(
+    `${API_BASE}/api/reports/${encodeURIComponent(salespersonName)}`,
+  );
+}
+
 async function deleteSession(sessionId: string) {
   const response = await fetch(
     `${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}`,
@@ -272,6 +309,40 @@ function formatDuration(start?: string, end?: string | null) {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function eventStableId(event: SessionEvent, index: number) {
+  return String(event.id ?? `${event.timestamp ?? "no-time"}-${event.transcript ?? ""}-${index}`);
+}
+
+function sortEventsChronologically(events: SessionEvent[]) {
+  return [...events].sort((first, second) => {
+    const firstTime = first.timestamp ? new Date(first.timestamp).getTime() : 0;
+    const secondTime = second.timestamp ? new Date(second.timestamp).getTime() : 0;
+    const timeCompare = (Number.isNaN(firstTime) ? 0 : firstTime) - (Number.isNaN(secondTime) ? 0 : secondTime);
+    if (timeCompare !== 0) {
+      return timeCompare;
+    }
+
+    return (first.id ?? 0) - (second.id ?? 0);
+  });
+}
+
+function mergeEventsById(previous: SessionEvent[], incoming: SessionEvent[]) {
+  const renderedIds = new Set(previous.map(eventStableId));
+  const additions = sortEventsChronologically(incoming).filter(
+    (event, index) => !renderedIds.has(eventStableId(event, index)),
+  );
+
+  return additions.length > 0 ? [...previous, ...additions] : previous;
+}
+
+function sortSessionsNewestFirst(sessions: Session[]) {
+  return [...sessions].sort((first, second) => {
+    const firstTime = first.start_time ? new Date(first.start_time).getTime() : 0;
+    const secondTime = second.start_time ? new Date(second.start_time).getTime() : 0;
+    return (Number.isNaN(secondTime) ? 0 : secondTime) - (Number.isNaN(firstTime) ? 0 : firstTime);
+  });
 }
 
 function normalizePriority(priority?: string) {
@@ -440,6 +511,7 @@ export default function Page() {
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const renderedEventIdsRef = useRef<Set<string>>(new Set());
 
   const loadStores = useCallback(async () => {
     setError(null);
@@ -494,6 +566,39 @@ export default function Page() {
     }
   }, []);
 
+  const refreshStoreSessions = useCallback(async (store: Store) => {
+    if (salespersons.length === 0) {
+      return;
+    }
+
+    try {
+      const nextSessions = await fetchSessions(store.id);
+      const lastAlertTimes = await loadLastAlertTimes(nextSessions, salespersons);
+
+      setStoreSessions(nextSessions);
+      setAllSessions((previous) => {
+        const otherStoreSessions = previous.filter((session) => session.store_id !== store.id);
+        return [...otherStoreSessions, ...nextSessions];
+      });
+      setSalespersonSummaries(
+        Object.fromEntries(
+          salespersons.map((salesperson) => [
+            salesperson.id,
+            buildSalespersonSummary(
+              nextSessions,
+              salesperson,
+              lastAlertTimes[salesperson.id] ?? null,
+            ),
+          ]),
+        ),
+      );
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error ? loadError.message : "Session refresh failed",
+      );
+    }
+  }, [salespersons]);
+
   const loadConversation = useCallback(async () => {
     if (!selectedStore || !selectedSalesperson) {
       return;
@@ -516,6 +621,7 @@ export default function Page() {
       setSelectedSession(nextSelectedSession);
 
       if (!nextSelectedSession) {
+        renderedEventIdsRef.current = new Set();
         setEvents([]);
         setStats(emptyStats);
         setLastUpdated(new Date());
@@ -527,7 +633,11 @@ export default function Page() {
         fetchStats(nextSelectedSession.session_id),
       ]);
 
-      setEvents(nextEvents);
+      setEvents((previous) => {
+        const mergedEvents = mergeEventsById(previous, nextEvents);
+        renderedEventIdsRef.current = new Set(mergedEvents.map(eventStableId));
+        return mergedEvents;
+      });
       setStats({ ...emptyStats, ...nextStats });
       setLastUpdated(new Date());
     } catch (loadError) {
@@ -561,6 +671,15 @@ export default function Page() {
       window.clearTimeout(initialRefresh);
     };
   }, [loadSalespersons, selectedSalesperson, selectedStore]);
+
+  useEffect(() => {
+    if (!selectedStore || salespersons.length === 0) {
+      return;
+    }
+
+    const interval = window.setInterval(() => void refreshStoreSessions(selectedStore), REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [refreshStoreSessions, salespersons.length, selectedStore]);
 
   useEffect(() => {
     if (!selectedStore || !selectedSalesperson) {
@@ -627,7 +746,9 @@ export default function Page() {
         fetchStats(session.session_id),
       ]);
 
-      setEvents(nextEvents);
+      const sortedEvents = sortEventsChronologically(nextEvents);
+      renderedEventIdsRef.current = new Set(sortedEvents.map(eventStableId));
+      setEvents(sortedEvents);
       setStats({ ...emptyStats, ...nextStats });
       setLastUpdated(new Date());
     } catch (loadError) {
@@ -653,6 +774,7 @@ export default function Page() {
       if (selectedSession?.session_id === sessionId) {
         setSelectedSession(null);
         setSessionSelectionPaused(true);
+        renderedEventIdsRef.current = new Set();
         setEvents([]);
         setStats(emptyStats);
         setLastUpdated(new Date());
@@ -667,6 +789,7 @@ export default function Page() {
     setSelectedSalesperson(null);
     setSelectedSession(null);
     setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
     setLastUpdated(null);
@@ -676,6 +799,10 @@ export default function Page() {
     setSelectedSalesperson(salesperson);
     setSelectedSession(null);
     setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
+    setEvents([]);
+    setStats(emptyStats);
+    setLastUpdated(null);
   };
 
   const backToStores = () => {
@@ -684,6 +811,7 @@ export default function Page() {
     setSelectedSalesperson(null);
     setSelectedSession(null);
     setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
     setSalespersons([]);
     setStoreSessions([]);
     setEvents([]);
@@ -697,10 +825,37 @@ export default function Page() {
     setError(null);
   };
 
+  const openReports = () => {
+    setView("reports");
+    setSelectedStore(null);
+    setSelectedSalesperson(null);
+    setSelectedSession(null);
+    setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
+    setEvents([]);
+    setStats(emptyStats);
+    setLastUpdated(null);
+    setError(null);
+  };
+
+  const openAlerts = () => {
+    setView("alerts");
+    setSelectedStore(null);
+    setSelectedSalesperson(null);
+    setSelectedSession(null);
+    setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
+    setEvents([]);
+    setStats(emptyStats);
+    setLastUpdated(null);
+    setError(null);
+  };
+
   const backToSalespersons = () => {
     setSelectedSalesperson(null);
     setSelectedSession(null);
     setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
     setLastUpdated(null);
@@ -719,7 +874,9 @@ export default function Page() {
         <DashboardSidebar
           activeSessions={activeSessions}
           activeView={view}
+          onSelectAlerts={openAlerts}
           onSelectPinManagement={openPinManagement}
+          onSelectReports={openReports}
           onSelectStores={backToStores}
           selectedSalesperson={selectedSalesperson}
           selectedStore={selectedStore}
@@ -744,6 +901,10 @@ export default function Page() {
 
             {view === "pin-management" ? (
               <PinManagementView stores={stores} />
+            ) : view === "reports" ? (
+              <ReportsView stores={stores} />
+            ) : view === "alerts" ? (
+              <AlertsView />
             ) : !selectedStore ? (
               <StoreSelection
                 activeCounts={storeActiveCounts}
@@ -787,14 +948,18 @@ export default function Page() {
 function DashboardSidebar({
   activeSessions,
   activeView,
+  onSelectAlerts,
   onSelectPinManagement,
+  onSelectReports,
   onSelectStores,
   selectedSalesperson,
   selectedStore,
 }: {
   activeSessions: number;
   activeView: DashboardView;
+  onSelectAlerts: () => void;
   onSelectPinManagement: () => void;
+  onSelectReports: () => void;
   onSelectStores: () => void;
   selectedSalesperson: Salesperson | null;
   selectedStore: Store | null;
@@ -808,8 +973,8 @@ function DashboardSidebar({
       action: activeView === "stores" && selectedStore ? undefined : onSelectStores,
     },
     { label: "PIN Management", icon: KeyRound, active: activeView === "pin-management", action: onSelectPinManagement },
-    { label: "Reports", icon: LayoutDashboard, active: false },
-    { label: "Alerts Log", icon: Bell, active: false },
+    { label: "Reports", icon: LayoutDashboard, active: activeView === "reports", action: onSelectReports },
+    { label: "Alerts Log", icon: Bell, active: activeView === "alerts", action: onSelectAlerts },
   ];
 
   return (
@@ -859,6 +1024,10 @@ function DashboardSidebar({
           <p className="mt-2 text-sm font-medium text-zinc-100">
             {activeView === "pin-management"
               ? "Salesperson PINs"
+              : activeView === "reports"
+                ? "Coaching Reports"
+                : activeView === "alerts"
+                  ? "Alerts Log"
               : selectedSalesperson?.name ?? selectedStore?.name ?? "Store Overview"}
           </p>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
@@ -888,6 +1057,10 @@ function DashboardTopbar({
   const istTime = useIstTime();
   const breadcrumb = activeView === "pin-management"
     ? ["PIN Management"]
+    : activeView === "reports"
+      ? ["Reports"]
+      : activeView === "alerts"
+        ? ["Alerts Log"]
     : [
       selectedStore?.name ?? "Stores",
       selectedSalesperson?.name,
@@ -902,6 +1075,10 @@ function DashboardTopbar({
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
             {activeView === "pin-management"
               ? "PIN Management"
+              : activeView === "reports"
+                ? "Coaching Reports"
+                : activeView === "alerts"
+                  ? "Alerts Log"
               : selectedSalesperson ? "Conversation Monitor" : selectedStore ? "Sales Team" : "Store Overview"}
           </h1>
         </div>
@@ -1092,6 +1269,248 @@ function SalespersonSelection({
               );
             })}
           </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AlertsView() {
+  const [alerts, setAlerts] = useState<AlertLogEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadAlerts = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+
+    try {
+      setAlerts(await fetchAlertsLog());
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Alerts refresh failed");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => void loadAlerts(), 0);
+    const interval = window.setInterval(() => void loadAlerts(), REFRESH_MS);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+  }, [loadAlerts]);
+
+  return (
+    <section className="flex flex-col gap-5">
+      <SectionIntro
+        eyebrow="Alerts"
+        title="Alerts log"
+        description="Review the most recent manager notifications sent from live conversations."
+      />
+
+      {loadError ? (
+        <div className="rounded-lg border border-[var(--mk-danger)]/30 bg-[var(--mk-danger)]/10 p-3 text-sm text-zinc-100">
+          Could not refresh alerts: {loadError}
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-lg border border-white/10 bg-[var(--mk-surface)]">
+        <div className="hidden grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.8fr] gap-4 border-b border-white/10 px-4 py-3 text-xs uppercase tracking-[0.14em] text-zinc-500 lg:grid">
+          <span>Time</span>
+          <span>Store</span>
+          <span>Salesperson</span>
+          <span>Priority</span>
+          <span>Channel</span>
+          <span>Status</span>
+        </div>
+        <div className="divide-y divide-white/10">
+          {isLoading && alerts.length === 0 ? (
+            <div className="p-4">
+              <EmptyState>Loading alerts</EmptyState>
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="p-4">
+              <EmptyState>No alerts logged yet</EmptyState>
+            </div>
+          ) : (
+            alerts.map((alert, index) => {
+              const alertTime = alert.sent_at ?? alert.timestamp;
+              const priority = normalizePriority(alert.priority ?? alert.alert_priority);
+              const status = alert.status ?? "sent";
+
+              return (
+                <div
+                  key={alert.id ?? `${alertTime ?? "alert"}-${index}`}
+                  className="grid gap-3 px-4 py-4 text-sm lg:grid-cols-[1.2fr_1fr_1fr_0.8fr_0.8fr_0.8fr] lg:items-center"
+                >
+                  <time className="text-zinc-400">{formatTimestamp(alertTime)}</time>
+                  <span className="text-zinc-200">{alert.store_name ?? alert.store ?? "Unknown store"}</span>
+                  <span className="text-zinc-200">{alert.salesperson_name ?? alert.salesperson ?? "Unknown"}</span>
+                  <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs font-medium uppercase text-zinc-100">
+                    <span className={cn("size-2 rounded-full", priorityDotClasses(priority))} />
+                    {priority === "none" ? "unknown" : priority}
+                  </span>
+                  <span className="text-zinc-400">{alert.channel ?? "default"}</span>
+                  <span className={cn(
+                    "w-fit rounded-full border px-2.5 py-1 text-xs font-medium",
+                    status === "failed"
+                      ? "border-red-400/25 bg-red-500/10 text-red-100"
+                      : status === "skipped"
+                        ? "border-zinc-500/25 bg-white/[0.04] text-zinc-300"
+                        : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100",
+                  )}>
+                    {status}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ReportsView({ stores }: { stores: Store[] }) {
+  const [allSalespersons, setAllSalespersons] = useState<Salesperson[]>([]);
+  const [selectedName, setSelectedName] = useState("");
+  const [reports, setReports] = useState<CoachingReport[]>([]);
+  const [isLoadingSalespersons, setIsLoadingSalespersons] = useState(false);
+  const [isLoadingReports, setIsLoadingReports] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stores.length === 0) {
+      setAllSalespersons([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingSalespersons(true);
+    setLoadError(null);
+
+    Promise.all(stores.map((store) => fetchStoreSalespersons(store.id)))
+      .then((salespersonGroups) => {
+        if (!cancelled) {
+          setAllSalespersons(salespersonGroups.flat());
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Salesperson list refresh failed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingSalespersons(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [stores]);
+
+  useEffect(() => {
+    if (!selectedName) {
+      setReports([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingReports(true);
+    setLoadError(null);
+
+    fetchReports(selectedName)
+      .then((nextReports) => {
+        if (!cancelled) {
+          setReports([...nextReports].sort((first, second) => {
+            const firstDate = first.report_date ?? first.date ?? first.created_at ?? "";
+            const secondDate = second.report_date ?? second.date ?? second.created_at ?? "";
+            return firstDate.localeCompare(secondDate);
+          }));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Reports refresh failed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingReports(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedName]);
+
+  return (
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4 rounded-lg border border-white/10 bg-[var(--mk-surface)] p-5 md:flex-row md:items-end md:justify-between">
+        <SectionIntro
+          eyebrow="Reports"
+          title="Coaching reports"
+          description="Read the latest seven days of nightly salesperson coaching notes."
+        />
+
+        <label className="w-full md:max-w-sm">
+          <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">
+            Salesperson
+          </span>
+          <select
+            value={selectedName}
+            onChange={(event) => setSelectedName(event.target.value)}
+            className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-black/35 px-3 text-sm text-zinc-100 outline-none transition focus:border-[var(--mk-gold)]/60 focus:ring-2 focus:ring-[var(--mk-gold)]/15"
+          >
+            <option value="">
+              {isLoadingSalespersons ? "Loading salespeople" : "Select salesperson"}
+            </option>
+            {allSalespersons.map((salesperson) => (
+              <option key={salesperson.id} value={salesperson.name}>
+                {salesperson.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {loadError ? (
+        <div className="rounded-lg border border-[var(--mk-danger)]/30 bg-[var(--mk-danger)]/10 p-3 text-sm text-zinc-100">
+          Could not refresh reports: {loadError}
+        </div>
+      ) : null}
+
+      {!selectedName ? (
+        <EmptyState>Select a salesperson to view recent coaching reports.</EmptyState>
+      ) : isLoadingReports && reports.length === 0 ? (
+        <EmptyState>Loading reports</EmptyState>
+      ) : reports.length === 0 ? (
+        <EmptyState>No reports generated yet. Reports are generated nightly at 9pm.</EmptyState>
+      ) : (
+        <div className="grid gap-3">
+          {reports.map((report, index) => {
+            const reportDate = report.report_date ?? report.date ?? report.created_at ?? "";
+            const reportText = report.report_text ?? report.text ?? report.content ?? "";
+
+            return (
+              <article
+                key={report.id ?? `${reportDate}-${index}`}
+                className="rounded-lg border border-white/10 bg-[var(--mk-surface)] p-4"
+              >
+                <h3 className="text-sm font-semibold text-[var(--mk-gold-light)]">
+                  {formatTimestamp(reportDate)}
+                </h3>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-200">
+                  {reportText || "No report text captured."}
+                </p>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>
@@ -1426,13 +1845,62 @@ function ConversationView({
   store: Store;
   storeSessions: Session[];
 }) {
-  const salespersonSessions = storeSessions.filter((session) =>
-    sessionBelongsToSalesperson(session, salesperson),
+  const salespersonSessions = sortSessionsNewestFirst(
+    storeSessions.filter((session) =>
+      sessionBelongsToSalesperson(session, salesperson),
+    ),
   );
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [conversationMode, setConversationMode] = useState<ConversationMode>("live");
+  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
+  const renderedTranscriptIdsRef = useRef<Set<string>>(new Set());
+  const scrollSnapshotRef = useRef({ scrollTop: 0, scrollHeight: 0, wasAtBottom: true });
+  const fullConversationText = useMemo(
+    () =>
+      events
+        .map((event) => `[${formatTimestamp(event.timestamp)}] ${event.transcript || ""}`.trim())
+        .join("\n"),
+    [events],
+  );
+
+  useEffect(() => {
+    renderedTranscriptIdsRef.current = new Set(events.map(eventStableId));
+  }, [events]);
+
+  useLayoutEffect(() => {
+    const container = transcriptContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const { scrollTop, scrollHeight, wasAtBottom } = scrollSnapshotRef.current;
+    if (wasAtBottom) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
+    const heightDelta = container.scrollHeight - scrollHeight;
+    container.scrollTop = scrollTop + heightDelta;
+  }, [events, conversationMode]);
+
+  useLayoutEffect(() => {
+    return () => {
+      const container = transcriptContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      scrollSnapshotRef.current = {
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        wasAtBottom:
+          container.scrollHeight - container.scrollTop - container.clientHeight <= 100,
+      };
+    };
+  }, [events, conversationMode]);
 
   useEffect(() => {
     if (!deleteMessage) {
@@ -1574,28 +2042,76 @@ function ConversationView({
           <section className="min-h-0 rounded-lg border border-white/10 bg-[var(--mk-surface)]">
             <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-semibold text-zinc-100">Live Transcript Feed</h2>
+                <h2 className="font-semibold text-zinc-100">
+                  {conversationMode === "live" ? "Live Transcript Feed" : "Full Conversation"}
+                </h2>
                 <p className="mt-1 text-sm text-zinc-500">
                   {selectedSession
                     ? `Session #${selectedSession.session_id}`
                     : "No session found for this salesperson yet."}
                 </p>
               </div>
-              <span className="text-xs text-zinc-500">
-                {isLoading ? "Refreshing" : `${events.length} events`}
-                {lastUpdated ? `, updated ${lastUpdated.toLocaleTimeString()}` : ""}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-lg border border-white/10 bg-black/25 p-1">
+                  {(["live", "full"] as ConversationMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setConversationMode(mode)}
+                      className={cn(
+                        "min-h-8 rounded-md px-3 text-xs font-medium transition",
+                        conversationMode === mode
+                          ? "bg-[var(--mk-gold)] text-[var(--mk-dark)]"
+                          : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-100",
+                      )}
+                    >
+                      {mode === "live" ? "Live Feed" : "Full Conversation"}
+                    </button>
+                  ))}
+                </div>
+                {conversationMode === "full" && selectedSession ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void navigator.clipboard.writeText(fullConversationText)}
+                    className="min-h-9 border-white/10 bg-transparent text-xs text-zinc-300 hover:border-[var(--mk-gold)]/50 hover:bg-[var(--mk-gold)]/10 hover:text-[var(--mk-gold-light)]"
+                  >
+                    Copy All
+                  </Button>
+                ) : null}
+                <span className="text-xs text-zinc-500">
+                  {isLoading ? "Refreshing" : `${events.length} events`}
+                  {lastUpdated ? `, updated ${lastUpdated.toLocaleTimeString()}` : ""}
+                </span>
+              </div>
             </div>
 
-            <div className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]">
+            <div
+              ref={transcriptContainerRef}
+              className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]"
+            >
               {!selectedSession ? (
                 <EmptyState>No transcript session exists for this salesperson yet.</EmptyState>
               ) : events.length === 0 ? (
                 <EmptyState>No transcript events for this session yet.</EmptyState>
+              ) : conversationMode === "full" ? (
+                <div className="space-y-3 rounded-lg border border-white/10 bg-black/25 p-4">
+                  {events.map((event, index) => (
+                    <p
+                      key={eventStableId(event, index)}
+                      className="text-sm leading-7 text-zinc-100"
+                    >
+                      <time className="mr-2 text-xs text-zinc-500">
+                        {formatTimestamp(event.timestamp)}
+                      </time>
+                      {event.transcript || "No transcript text captured."}
+                    </p>
+                  ))}
+                </div>
               ) : (
                 events.map((event, index) => (
                   <TranscriptCard
-                    key={`${event.id ?? event.timestamp ?? "event"}-${index}`}
+                    key={eventStableId(event, index)}
                     event={event}
                     onSaveFeedback={onSaveFeedback}
                     savedFeedbackIds={savedFeedbackIds}
@@ -1678,6 +2194,7 @@ function SessionListRow({
           <span>{formatDuration(session.start_time, session.end_time)}</span>
           <span className={cn("size-1.5 rounded-full", isActiveSession(session) ? "bg-[var(--mk-success)]" : "bg-zinc-600")} />
           <span>{isActiveSession(session) ? "Active" : "Closed"}</span>
+          <span>{session.event_count ?? 0} events</span>
         </span>
       </button>
       <button
