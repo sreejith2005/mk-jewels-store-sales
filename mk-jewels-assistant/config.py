@@ -34,7 +34,9 @@ class Config:
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
     INDIC_CONFORMER_LANGUAGE = os.getenv("INDIC_CONFORMER_LANGUAGE", "hi")
-    TRANSLITERATE_TO_ROMAN = os.getenv("TRANSLITERATE_TO_ROMAN", "true")
+    USE_LOCAL_DISPLAY_NORMALIZATION = (
+        os.getenv("USE_LOCAL_DISPLAY_NORMALIZATION", "true").lower() == "true"
+    )
     SILENCE_THRESHOLD = int(os.getenv("SILENCE_THRESHOLD", "200"))
     DIARIZATION_ENABLED = os.getenv("DIARIZATION_ENABLED", "false").lower() == "true"
     HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")

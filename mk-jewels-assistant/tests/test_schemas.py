@@ -61,6 +61,10 @@ def test_validate_event_coerces_string_booleans():
     event["price_concern"] = "false"
     event["certification_question"] = "FALSE"
     event["intent_signal"] = "TRUE"
+    event["script_deviation"] = "false"
+    event["factual_error"] = "true"
+    event["missed_script_response"] = "FALSE"
+    event["knowledge_base_followed"] = "true"
 
     validated = validate_event(event)
 
@@ -68,3 +72,19 @@ def test_validate_event_coerces_string_booleans():
     assert validated["price_concern"] is False
     assert validated["certification_question"] is False
     assert validated["intent_signal"] is True
+    assert validated["script_deviation"] is False
+    assert validated["factual_error"] is True
+    assert validated["missed_script_response"] is False
+    assert validated["knowledge_base_followed"] is True
+
+
+def test_validate_event_accepts_display_transcript_and_raw_fallback():
+    event = valid_event()
+    event["transcript"] = "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    event["display_transcript"] = "Mujhe aapki service bilkul pasand nahi hai"
+
+    validated = validate_event(event)
+
+    assert validated["raw_transcript"] == "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    assert validated["display_transcript"] == "Mujhe aapki service bilkul pasand nahi hai"
+    assert validated["transcript"] == "Mujhe aapki service bilkul pasand nahi hai"

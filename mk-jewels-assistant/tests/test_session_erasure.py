@@ -68,6 +68,28 @@ def test_delete_session_without_auth_returns_401(dashboard_client):
     assert response.status_code == 401
 
 
+def test_events_api_returns_raw_display_and_compatible_transcript(dashboard_client):
+    client, db = dashboard_client
+    session_id = db.create_session("Maya")
+    event = _event_dict()
+    event["transcript"] = "Mujhe aapki service bilkul pasand nahi hai"
+    event["raw_transcript"] = "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    event["display_transcript"] = "Mujhe aapki service bilkul pasand nahi hai"
+
+    db.log_event(session_id, "Maya", event)
+
+    response = client.get(
+        f"/api/events/{session_id}",
+        headers=_basic_auth_header(),
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload[0]["raw_transcript"] == "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    assert payload[0]["display_transcript"] == "Mujhe aapki service bilkul pasand nahi hai"
+    assert payload[0]["transcript"] == "Mujhe aapki service bilkul pasand nahi hai"
+
+
 def _event_dict():
     return {
         "transcript": "Customer compared prices.",

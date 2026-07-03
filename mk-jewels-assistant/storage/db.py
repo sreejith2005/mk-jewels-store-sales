@@ -137,6 +137,9 @@ class Database:
                                 salesperson_name TEXT,
                                 timestamp TEXT,
                                 transcript TEXT,
+                                raw_transcript TEXT,
+                                display_transcript TEXT,
+                                triage_status TEXT DEFAULT NULL,
                                 objection_detected INTEGER,
                                 price_concern INTEGER,
                                 certification_question INTEGER,
@@ -160,6 +163,22 @@ class Database:
                             END $$;
                             """
                         )
+                        for column_sql in (
+                            "ADD COLUMN raw_transcript TEXT",
+                            "ADD COLUMN display_transcript TEXT",
+                            "ADD COLUMN triage_status TEXT DEFAULT NULL",
+                        ):
+                            cursor.execute(
+                                f"""
+                                DO $$
+                                BEGIN
+                                    ALTER TABLE events
+                                    {column_sql};
+                                EXCEPTION WHEN duplicate_column THEN
+                                    NULL;
+                                END $$;
+                                """
+                            )
                         cursor.execute(
                             """
                             CREATE TABLE IF NOT EXISTS alert_log (
@@ -287,6 +306,9 @@ class Database:
                     salesperson_name TEXT,
                     timestamp TEXT,
                     transcript TEXT,
+                    raw_transcript TEXT,
+                    display_transcript TEXT,
+                    triage_status TEXT DEFAULT NULL,
                     objection_detected INTEGER,
                     price_concern INTEGER,
                     certification_question INTEGER,
@@ -320,6 +342,15 @@ class Database:
                 )
             except sqlite3.OperationalError:
                 pass
+            for column_sql in (
+                "raw_transcript TEXT",
+                "display_transcript TEXT",
+                "triage_status TEXT DEFAULT NULL",
+            ):
+                try:
+                    self._connection.execute(f"ALTER TABLE events ADD COLUMN {column_sql}")
+                except sqlite3.OperationalError:
+                    pass
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS reports (
@@ -760,11 +791,21 @@ class Database:
         return session_id
 
     def log_event(self, session_id: str, salesperson_name: str, event_dict: dict[str, Any]) -> int | None:
+        raw_transcript = str(
+            event_dict.get("raw_transcript") or event_dict.get("transcript") or ""
+        )
+        display_transcript = str(
+            event_dict.get("display_transcript") or event_dict.get("transcript") or raw_transcript
+        )
+        transcript = display_transcript or raw_transcript
         values = (
             session_id,
             salesperson_name,
             self._utc_now(),
-            event_dict.get("transcript", ""),
+            transcript,
+            raw_transcript,
+            display_transcript,
+            event_dict.get("triage_status"),
             self._as_int(event_dict.get("objection_detected")),
             self._as_int(event_dict.get("price_concern")),
             self._as_int(event_dict.get("certification_question")),
@@ -787,6 +828,9 @@ class Database:
                                 salesperson_name,
                                 timestamp,
                                 transcript,
+                                raw_transcript,
+                                display_transcript,
+                                triage_status,
                                 objection_detected,
                                 price_concern,
                                 certification_question,
@@ -796,7 +840,7 @@ class Database:
                                 alert_priority,
                                 reasoning
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             RETURNING id
                             """,
                             values,
@@ -817,6 +861,9 @@ class Database:
                     salesperson_name,
                     timestamp,
                     transcript,
+                    raw_transcript,
+                    display_transcript,
+                    triage_status,
                     objection_detected,
                     price_concern,
                     certification_question,
@@ -826,7 +873,7 @@ class Database:
                     alert_priority,
                     reasoning
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -915,7 +962,8 @@ class Database:
                             """,
                             (session_id,),
                         )
-                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        rows = self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        return self._normalise_event_rows(rows)
                 except Exception as exc:
                     connection.rollback()
                     raise DatabaseError("Failed to fetch session events.") from exc
@@ -932,7 +980,7 @@ class Database:
                 (session_id,),
             ).fetchall()
 
-        return [dict(row) for row in rows]
+        return self._normalise_event_rows([dict(row) for row in rows])
 
     def save_session_score(
         self,
@@ -1450,7 +1498,8 @@ class Database:
                                 """,
                                 (start.isoformat(), end.isoformat()),
                             )
-                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        rows = self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        return self._normalise_event_rows(rows)
                 except Exception as exc:
                     connection.rollback()
                     raise DatabaseError("Failed to fetch today's events.") from exc
@@ -1481,7 +1530,7 @@ class Database:
                     (start.isoformat(), end.isoformat()),
                 ).fetchall()
 
-        return [dict(row) for row in rows]
+        return self._normalise_event_rows([dict(row) for row in rows])
 
     def delete_events_older_than(self, days: int) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -1620,6 +1669,16 @@ class Database:
         if text == "negative":
             return "Negative"
         return "Neutral"
+
+    @staticmethod
+    def _normalise_event_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for row in rows:
+            raw_transcript = row.get("raw_transcript") or row.get("transcript") or ""
+            display_transcript = row.get("display_transcript") or raw_transcript
+            row["raw_transcript"] = raw_transcript
+            row["display_transcript"] = display_transcript
+            row["transcript"] = display_transcript or raw_transcript
+        return rows
 
     @staticmethod
     def _rows_to_dicts(description: Iterable[Any], rows: Iterable[tuple[Any, ...]]):

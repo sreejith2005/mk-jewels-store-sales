@@ -79,7 +79,16 @@ CRITICAL_ALERT_CALIBRATION_RULES = (
     "not just the salesperson's failure. objection_detected and price_concern "
     "describe what the customer said. upsell_miss and knowledge_gap describe "
     "the salesperson's response.\n\n"
-    "6. The reasoning field must state specifically what the salesperson said "
+    "6. Signals describe what happened in the conversation. If the customer "
+    "clearly expresses price concern, dissatisfaction, objection, certification "
+    "question, or buying intent, mark the relevant signal true even if the "
+    "salesperson responds well. Examples: \"Price zyada hai\" => price_concern "
+    "true; \"Making charges high hai\" => price_concern true and "
+    "objection_detected true; \"Mujhe service pasand nahi hai\" => "
+    "objection_detected true; \"Diamond certified hai kya?\" => "
+    "certification_question true; \"Mujhe bridal collection dekhna hai\" => "
+    "intent_signal true.\n\n"
+    "7. The reasoning field must state specifically what the salesperson said "
     "vs what the script says, in max 20 words. Do not write vague reasons like "
     "\"did not follow script\"."
 )
@@ -94,10 +103,17 @@ USER_PROMPT_TEMPLATE = (
     "Classify this jewelry sales conversation. Respond with ONLY the JSON object. "
     "No explanation, no preamble, no markdown code fences. Maximum response "
     "length: 150 tokens. Return exactly these fields: "
-    "objection_detected (bool), price_concern (bool), certification_question (bool), "
+    "display_transcript (string), objection_detected (bool), price_concern (bool), certification_question (bool), "
     "upsell_miss (bool), knowledge_gap (bool), intent_signal (bool), "
     "alert_priority (string, one of: none / low / medium / high), "
-    "reasoning (string, max 20 words)."
+    "reasoning (string, max 20 words).\n\n"
+    "display_transcript rules: If transcript is Hindi in Devanagari, convert it "
+    "to natural readable Hinglish, e.g. \"मुझे अच्छा लगा\" -> \"Mujhe acha "
+    "laga\" and \"मुझे आपकी सर्विस बिल्कुल पसंद नहीं है\" -> \"Mujhe aapki "
+    "service bilkul pasand nahi hai\". If transcript is English, keep natural "
+    "English. If mixed Hindi-English, keep natural Hinglish. Do NOT use "
+    "academic transliteration, ITRANS-style text, or capitalized phonetic "
+    "symbols like prAijiMga, kaiMDa, brAiDala. Keep meaning the same."
 )
 
 SESSION_SCORE_PROMPT_TEMPLATE = (
@@ -246,6 +262,9 @@ def _empty_event() -> dict:
     return _validate_triage_result(
         {
             "transcript": "",
+            "raw_transcript": "",
+            "display_transcript": "",
+            "triage_status": "skipped",
             "objection_detected": False,
             "price_concern": False,
             "certification_question": False,
@@ -264,11 +283,16 @@ def triage(transcript: str, salesperson_name: str) -> dict:
     if not transcript_text:
         logger.info("Skipping Qwen3 triage for empty transcript.")
         return _empty_event()
+    display_instruction = (
+        "Normalize display_transcript for readable store-owner Hinglish."
+        if Config.USE_LOCAL_DISPLAY_NORMALIZATION
+        else "Set display_transcript exactly equal to the input transcript."
+    )
 
     payload = {
         "model": MODEL_NAME,
         "stream": False,
-        "options": {"num_predict": 150, "temperature": 0},
+        "options": {"num_predict": 260, "temperature": 0},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -276,7 +300,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
                 "content": USER_PROMPT_TEMPLATE.format(
                     salesperson_name=salesperson_name,
                     transcript=transcript,
-                    kb_context=build_kb_context(transcript),
+                    kb_context=f"{display_instruction}\n\n{build_kb_context(transcript)}",
                     calibration_rules=CRITICAL_ALERT_CALIBRATION_RULES,
                 ),
             },
@@ -298,7 +322,10 @@ def triage(transcript: str, salesperson_name: str) -> dict:
     raw_text = response_json["message"]["content"]
     logger.info("Raw Qwen3 triage response: %s", raw_text)
     result = _parse_json_response(raw_text)
-    result["transcript"] = transcript
+    result["raw_transcript"] = transcript
+    result["display_transcript"] = result.get("display_transcript") or transcript
+    result["transcript"] = result["display_transcript"]
+    result["triage_status"] = "ok"
     return _validate_triage_result(result)
 
 

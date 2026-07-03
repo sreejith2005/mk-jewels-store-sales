@@ -77,6 +77,71 @@ def test_log_event_then_get_session_events_returns_salesperson_name(db):
     assert events[0]["salesperson_name"] == "Maya"
 
 
+def test_log_event_stores_raw_and_display_transcripts(db):
+    session_id = db.create_session("Maya")
+    event = event_dict()
+    event["transcript"] = "Mujhe aapki service bilkul pasand nahi hai"
+    event["raw_transcript"] = "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    event["display_transcript"] = "Mujhe aapki service bilkul pasand nahi hai"
+    event["triage_status"] = "ok"
+
+    db.log_event(session_id, "Maya", event)
+    stored = db.get_session_events(session_id)[0]
+
+    assert stored["raw_transcript"] == "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    assert stored["display_transcript"] == "Mujhe aapki service bilkul pasand nahi hai"
+    assert stored["transcript"] == "Mujhe aapki service bilkul pasand nahi hai"
+    assert stored["triage_status"] == "ok"
+
+
+def test_get_session_events_falls_back_to_raw_transcript(db):
+    with db._lock:
+        db._connection.execute(
+            """
+            INSERT INTO events (
+                session_id,
+                salesperson_name,
+                timestamp,
+                transcript,
+                raw_transcript,
+                display_transcript,
+                objection_detected,
+                price_concern,
+                certification_question,
+                upsell_miss,
+                knowledge_gap,
+                intent_signal,
+                alert_priority,
+                reasoning
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "fallback-session",
+                "Maya",
+                db._utc_now(),
+                "",
+                "मुझे अच्छा लगा",
+                "",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "none",
+                "legacy row",
+            ),
+        )
+        db._connection.commit()
+
+    stored = db.get_session_events("fallback-session")[0]
+
+    assert stored["raw_transcript"] == "मुझे अच्छा लगा"
+    assert stored["display_transcript"] == "मुझे अच्छा लगा"
+    assert stored["transcript"] == "मुझे अच्छा लगा"
+
+
 def test_get_today_events_excludes_yesterday(db):
     today = datetime.now(timezone.utc)
     yesterday = today - timedelta(days=1)

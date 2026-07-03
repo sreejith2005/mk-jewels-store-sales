@@ -71,6 +71,9 @@ type SessionEvent = {
   id?: number;
   timestamp?: string;
   transcript?: string;
+  raw_transcript?: string;
+  display_transcript?: string;
+  triage_status?: string;
   alert_priority?: string;
   reasoning?: string;
   manager_feedback?: FeedbackValue | null;
@@ -398,7 +401,11 @@ function formatDuration(start?: string, end?: string | null) {
 }
 
 function eventStableId(event: SessionEvent, index: number) {
-  return String(event.id ?? `${event.timestamp ?? "no-time"}-${event.transcript ?? ""}-${index}`);
+  return String(event.id ?? `${event.timestamp ?? "no-time"}-${eventDisplayTranscript(event)}-${index}`);
+}
+
+function eventDisplayTranscript(event: SessionEvent) {
+  return event.display_transcript || event.transcript || event.raw_transcript || "";
 }
 
 function sortEventsChronologically(events: SessionEvent[]) {
@@ -463,7 +470,7 @@ function priorityDotClasses(priority?: string) {
 }
 
 function signalBadges(event: SessionEvent) {
-  const text = `${event.reasoning ?? ""} ${event.transcript ?? ""}`.toLowerCase();
+  const text = `${event.reasoning ?? ""} ${eventDisplayTranscript(event)}`.toLowerCase();
   const badges: Array<{ label: string; className: string }> = [];
 
   if (normalizePriority(event.alert_priority) === "high") {
@@ -2274,7 +2281,7 @@ function ConversationView({
   const fullConversationText = useMemo(
     () =>
       events
-        .map((event) => `[${formatTimestamp(event.timestamp)}] ${event.transcript || ""}`.trim())
+        .map((event) => `[${formatTimestamp(event.timestamp)}] ${eventDisplayTranscript(event)}`.trim())
         .join("\n"),
     [events],
   );
@@ -2521,7 +2528,7 @@ function ConversationView({
                       <time className="mr-2 text-xs text-zinc-500">
                         {formatTimestamp(event.timestamp)}
                       </time>
-                      {event.transcript || "No transcript text captured."}
+                      {eventDisplayTranscript(event) || "No transcript text captured."}
                     </p>
                   ))}
                 </div>
@@ -2755,7 +2762,7 @@ function TranscriptCard({
       </div>
 
       <p className="text-sm leading-6 text-zinc-100">
-        {event.transcript || "No transcript text captured."}
+        {eventDisplayTranscript(event) || "No transcript text captured."}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2">

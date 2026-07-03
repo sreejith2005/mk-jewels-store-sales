@@ -1,12 +1,9 @@
 import json
 import os
-import re
 import sys
 import time
 
 import numpy as np
-from indic_transliteration import sanscript
-from indic_transliteration.sanscript import transliterate
 from scipy.io import wavfile
 
 
@@ -21,7 +18,6 @@ from triage import qwen3_triage
 
 
 logger = get_logger(__name__)
-DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
 _MODELS_WARMED_UP = False
 
 
@@ -60,6 +56,9 @@ def _empty_event(transcript: str, reasoning: str) -> EventDict:
     return validate_event(
         {
             "transcript": transcript,
+            "raw_transcript": transcript,
+            "display_transcript": transcript,
+            "triage_status": "failed" if reasoning == "triage failed" else "skipped",
             "objection_detected": False,
             "price_concern": False,
             "certification_question": False,
@@ -86,30 +85,6 @@ def _wav_data_to_pcm_bytes(data: np.ndarray) -> bytes:
         pcm = (data.astype(np.float32) / max_abs * 32767).astype(np.int16)
 
     return pcm.tobytes()
-
-
-def _transliterate_devanagari_to_roman(transcript: str) -> str:
-    if Config.TRANSLITERATE_TO_ROMAN.lower() != "true":
-        return transcript
-    if not DEVANAGARI_PATTERN.search(transcript):
-        return transcript
-
-    try:
-        transliterated = transliterate(
-            transcript,
-            sanscript.DEVANAGARI,
-            sanscript.ITRANS,
-        )
-    except Exception as error:
-        logger.warning("Devanagari transliteration failed: %s", error)
-        return transcript
-
-    logger.info(
-        "Transliterated Devanagari to Roman: %s -> %s",
-        transcript,
-        transliterated,
-    )
-    return transliterated
 
 
 def transcribe_and_triage(
@@ -167,8 +142,6 @@ def transcribe_and_triage(
         if not transcript:
             logger.warning("Empty transcript from STT, skipping triage")
             return _empty_event("", "STT failed")
-
-        transcript = _transliterate_devanagari_to_roman(transcript)
 
         logger.info(
             "STT completed: %s chars, salesperson=%s",
