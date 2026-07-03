@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -29,7 +30,7 @@ class Config:
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
     PIPELINE_MODE = _get_pipeline_mode()
     DASHBOARD_AUTH_USER = os.getenv("DASHBOARD_AUTH_USER", "admin")
-    DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "")
+    DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "5500")
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
@@ -64,3 +65,25 @@ class Config:
             import sys
             print(f"ERROR: Missing required config: {', '.join(missing)}")
             sys.exit(1)
+
+    @classmethod
+    def validate_pipeline(cls):
+        import logging
+
+        logger = logging.getLogger(__name__)
+        if cls.PIPELINE_MODE == "demo":
+            if not cls.GEMINI_API_KEY:
+                logger.warning(
+                    "PIPELINE_MODE=demo but GEMINI_API_KEY is not set."
+                )
+            return
+
+        if cls.PIPELINE_MODE == "production":
+            try:
+                requests.get(f"{cls.OLLAMA_HOST.rstrip('/')}/api/tags", timeout=2)
+            except requests.RequestException as error:
+                logger.warning(
+                    "PIPELINE_MODE=production but Ollama is unreachable at %s: %s",
+                    cls.OLLAMA_HOST,
+                    error,
+                )

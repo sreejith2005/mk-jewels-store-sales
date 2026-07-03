@@ -18,6 +18,10 @@ from triage import qwen3_triage
 
 
 logger = get_logger(__name__)
+logger.info(
+    f"Pipeline mode: {Config.PIPELINE_MODE} — using "
+    f"{'Gemini' if Config.PIPELINE_MODE == 'demo' else 'local models'}"
+)
 _MODELS_WARMED_UP = False
 
 

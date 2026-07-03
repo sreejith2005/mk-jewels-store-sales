@@ -24,6 +24,10 @@ except ImportError:
 
 
 logger = get_logger(__name__)
+logger.info(
+    f"Pipeline mode: {Config.PIPELINE_MODE} — using "
+    f"{'Gemini' if Config.PIPELINE_MODE == 'demo' else 'local models'}"
+)
 
 
 class GeminiAPIError(Exception):

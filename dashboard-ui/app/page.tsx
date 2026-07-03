@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   CircleDot,
   Clock3,
+  LogOut,
+  Settings,
   Headphones,
   KeyRound,
   LayoutDashboard,
@@ -32,9 +34,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-const DASHBOARD_AUTH_USER = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_USER;
-const DASHBOARD_AUTH_PASS = process.env.NEXT_PUBLIC_DASHBOARD_AUTH_PASS;
 const REFRESH_MS = 2000;
+const MANAGER_TOKEN_STORAGE_KEY = "mkj_manager_token";
+const MANAGER_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 type Store = {
   id: number;
@@ -145,6 +147,13 @@ type SalespersonSummary = {
   lastAlertTime: string | null;
 };
 
+type ApiCall = (url: string, options?: RequestInit) => Promise<Response>;
+
+type StoredManagerToken = {
+  token: string;
+  expires: number;
+};
+
 const emptyStats: Stats = {
   total_events: 0,
   alerts_fired: 0,
@@ -202,8 +211,8 @@ const scoreDimensions: Array<{
   { key: "closing_score", label: "Closing Ability" },
 ];
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
+async function fetchJson<T>(apiCall: ApiCall, url: string): Promise<T> {
+  const response = await apiCall(url, {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
@@ -215,34 +224,24 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json();
 }
 
-function fetchStores() {
-  return fetchJson<Store[]>(`${API_BASE}/api/stores`);
+function fetchStores(apiCall: ApiCall) {
+  return fetchJson<Store[]>(apiCall, `${API_BASE}/api/stores`);
 }
 
-function fetchStoreSalespersons(storeId: number) {
+function fetchStoreSalespersons(apiCall: ApiCall, storeId: number) {
   return fetchJson<Salesperson[]>(
+    apiCall,
     `${API_BASE}/api/stores/${encodeURIComponent(storeId)}/salespersons`,
   );
 }
 
-function basicAuthHeader(): Record<string, string> {
-  if (!DASHBOARD_AUTH_USER || !DASHBOARD_AUTH_PASS) {
-    return {};
-  }
-
-  return {
-    Authorization: `Basic ${window.btoa(`${DASHBOARD_AUTH_USER}:${DASHBOARD_AUTH_PASS}`)}`,
-  };
-}
-
-async function setSalespersonPin(salespersonId: number, pin: string) {
-  const response = await fetch(`${API_BASE}/api/admin/set_pin`, {
+async function setSalespersonPin(apiCall: ApiCall, salespersonId: number, pin: string) {
+  const response = await apiCall(`${API_BASE}/api/admin/set_pin`, {
     method: "POST",
     credentials: "include",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      ...basicAuthHeader(),
     },
     body: JSON.stringify({ salesperson_id: salespersonId, pin }),
   });
@@ -256,58 +255,62 @@ async function setSalespersonPin(salespersonId: number, pin: string) {
   return payload;
 }
 
-function fetchSessions(storeId?: number) {
+function fetchSessions(apiCall: ApiCall, storeId?: number) {
   const query = storeId ? `?store_id=${encodeURIComponent(storeId)}` : "";
-  return fetchJson<Session[]>(`${API_BASE}/api/sessions${query}`);
+  return fetchJson<Session[]>(apiCall, `${API_BASE}/api/sessions${query}`);
 }
 
-function fetchEvents(sessionId: string) {
+function fetchEvents(apiCall: ApiCall, sessionId: string) {
   return fetchJson<SessionEvent[]>(
+    apiCall,
     `${API_BASE}/api/events/${encodeURIComponent(sessionId)}`,
   );
 }
 
-function fetchStats(sessionId: string) {
-  return fetchJson<Stats>(`${API_BASE}/api/stats/${encodeURIComponent(sessionId)}`);
+function fetchStats(apiCall: ApiCall, sessionId: string) {
+  return fetchJson<Stats>(apiCall, `${API_BASE}/api/stats/${encodeURIComponent(sessionId)}`);
 }
 
-function fetchAlertsLog() {
-  return fetchJson<AlertLogEntry[]>(`${API_BASE}/api/alerts/log?limit=50`);
+function fetchAlertsLog(apiCall: ApiCall) {
+  return fetchJson<AlertLogEntry[]>(apiCall, `${API_BASE}/api/alerts/log?limit=50`);
 }
 
-function fetchReports(salespersonName: string) {
+function fetchReports(apiCall: ApiCall, salespersonName: string) {
   return fetchJson<CoachingReport[]>(
+    apiCall,
     `${API_BASE}/api/reports/${encodeURIComponent(salespersonName)}`,
   );
 }
 
-function fetchSessionScore(sessionId: string) {
+function fetchSessionScore(apiCall: ApiCall, sessionId: string) {
   return fetchJson<SessionScore>(
+    apiCall,
     `${API_BASE}/api/scores/session/${encodeURIComponent(sessionId)}`,
   );
 }
 
-function fetchSalespersonScores(salespersonName: string, days = 30) {
+function fetchSalespersonScores(apiCall: ApiCall, salespersonName: string, days = 30) {
   return fetchJson<SessionScore[]>(
+    apiCall,
     `${API_BASE}/api/scores/salesperson/${encodeURIComponent(salespersonName)}?days=${encodeURIComponent(days)}`,
   );
 }
 
-function fetchStoreLeaderboard(storeId: number) {
+function fetchStoreLeaderboard(apiCall: ApiCall, storeId: number) {
   return fetchJson<LeaderboardRow[]>(
+    apiCall,
     `${API_BASE}/api/scores/leaderboard/${encodeURIComponent(storeId)}`,
   );
 }
 
-async function generateSessionScore(sessionId: string) {
-  const response = await fetch(
+async function generateSessionScore(apiCall: ApiCall, sessionId: string) {
+  const response = await apiCall(
     `${API_BASE}/api/scores/generate/${encodeURIComponent(sessionId)}`,
     {
       method: "POST",
       credentials: "include",
       headers: {
         Accept: "application/json",
-        ...basicAuthHeader(),
       },
     },
   );
@@ -320,8 +323,8 @@ async function generateSessionScore(sessionId: string) {
   return payload as SessionScore;
 }
 
-async function deleteSession(sessionId: string) {
-  const response = await fetch(
+async function deleteSession(apiCall: ApiCall, sessionId: string) {
+  const response = await apiCall(
     `${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}`,
     {
       method: "DELETE",

@@ -1,15 +1,17 @@
 ﻿from __future__ import annotations
 
-import hmac
 import os
 import re
+import secrets
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from dotenv import set_key
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
@@ -28,10 +30,18 @@ CORS(app, origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","))
 db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
+ENV_PATH = APP_ROOT / ".env"
+MAX_MANAGER_TOKENS = 10
+MAX_FAILED_MANAGER_LOGINS = 5
+MANAGER_LOGIN_BLOCK_SECONDS = 5 * 60
+_manager_tokens: list[str] = []
+_manager_token_set: set[str] = set()
+_manager_auth_lock = threading.Lock()
+_manager_failed_attempts: dict[str, dict[str, float | int]] = {}
 
 
 @app.before_request
-def require_dashboard_auth() -> Any:
+def require_manager_token() -> Any:
     if request.method == "GET" and request.path == "/recorder":
         return None
     if request.method == "GET" and request.path.startswith("/static/"):
@@ -39,25 +49,17 @@ def require_dashboard_auth() -> Any:
     if request.method == "POST" and request.path in {
         "/api/auth/salesperson",
         "/api/auth/salesperson/set-first-pin",
+        "/api/auth/manager",
     }:
         return None
 
     if not Config.DASHBOARD_AUTH_PASS:
         return None
 
-    auth = request.authorization
-    if (
-        auth
-        and hmac.compare_digest(auth.username or "", Config.DASHBOARD_AUTH_USER)
-        and hmac.compare_digest(auth.password or "", Config.DASHBOARD_AUTH_PASS)
-    ):
+    if _has_valid_manager_auth():
         return None
 
-    return (
-        jsonify({"error": "Authentication required"}),
-        401,
-        {"WWW-Authenticate": 'Basic realm="MK Jewels Dashboard"'},
-    )
+    return jsonify({"error": "Unauthorized"}), 401
 
 
 @app.get("/recorder")
@@ -158,6 +160,61 @@ def set_first_salesperson_pin():
 
     if not db.set_salesperson_pin(salesperson_id, pin):
         return jsonify({"success": False, "error": "Salesperson not found"}), 404
+
+    return jsonify({"success": True})
+
+
+@app.post("/api/auth/manager")
+def authenticate_manager():
+    client_ip = _client_ip()
+    blocked_for = _manager_login_block_remaining(client_ip)
+    if blocked_for > 0:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Too many attempts, try again in 5 minutes",
+                }
+            ),
+            429,
+        )
+
+    data = request.get_json(silent=True) or {}
+    password = data.get("password")
+    if not isinstance(password, str) or not secrets.compare_digest(
+        password,
+        Config.DASHBOARD_AUTH_PASS,
+    ):
+        _record_failed_manager_login(client_ip)
+        return jsonify({"success": False, "error": "Invalid password"}), 401
+
+    _clear_failed_manager_login(client_ip)
+    token = _add_manager_token()
+    return jsonify({"success": True, "token": token})
+
+
+@app.post("/api/auth/manager/change-password")
+def change_manager_password():
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not isinstance(current_password, str) or not secrets.compare_digest(
+        current_password,
+        Config.DASHBOARD_AUTH_PASS,
+    ):
+        return jsonify({"success": False, "error": "Invalid password"}), 401
+
+    if not isinstance(new_password, str) or not new_password.strip():
+        return jsonify({"success": False, "error": "New password is required"}), 400
+
+    ENV_PATH.touch(exist_ok=True)
+    set_key(str(ENV_PATH), "DASHBOARD_AUTH_PASS", new_password)
+    Config.DASHBOARD_AUTH_PASS = new_password
+
+    with _manager_auth_lock:
+        _manager_tokens.clear()
+        _manager_token_set.clear()
 
     return jsonify({"success": True})
 
@@ -303,6 +360,79 @@ def queue_session_score_generation(session_id: str) -> None:
             logger.warning("Background score generation failed for %s: %s", session_id, error)
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def _extract_manager_token() -> str | None:
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+
+    header_token = request.headers.get("X-Manager-Token", "")
+    return header_token.strip() or None
+
+
+def _has_valid_manager_auth() -> bool:
+    token = _extract_manager_token()
+    if token and token in _manager_token_set:
+        return True
+
+    auth = request.authorization
+    return bool(
+        auth
+        and secrets.compare_digest(auth.username or "", Config.DASHBOARD_AUTH_USER)
+        and secrets.compare_digest(auth.password or "", Config.DASHBOARD_AUTH_PASS)
+    )
+
+
+def _add_manager_token() -> str:
+    token = secrets.token_hex(32)
+    with _manager_auth_lock:
+        _manager_tokens.append(token)
+        _manager_token_set.add(token)
+        while len(_manager_tokens) > MAX_MANAGER_TOKENS:
+            expired_token = _manager_tokens.pop(0)
+            _manager_token_set.discard(expired_token)
+    return token
+
+
+def _client_ip() -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _manager_login_block_remaining(client_ip: str) -> float:
+    with _manager_auth_lock:
+        attempt = _manager_failed_attempts.get(client_ip)
+        if not attempt:
+            return 0
+
+        blocked_until = float(attempt.get("blocked_until", 0))
+        remaining = blocked_until - time.time()
+        if remaining <= 0 and blocked_until:
+            _manager_failed_attempts.pop(client_ip, None)
+            return 0
+
+        return max(0, remaining)
+
+
+def _record_failed_manager_login(client_ip: str) -> None:
+    now = time.time()
+    with _manager_auth_lock:
+        attempt = _manager_failed_attempts.get(client_ip, {"count": 0, "blocked_until": 0})
+        count = int(attempt.get("count", 0)) + 1
+        _manager_failed_attempts[client_ip] = {
+            "count": count,
+            "blocked_until": now + MANAGER_LOGIN_BLOCK_SECONDS
+            if count >= MAX_FAILED_MANAGER_LOGINS
+            else 0,
+        }
+
+
+def _clear_failed_manager_login(client_ip: str) -> None:
+    with _manager_auth_lock:
+        _manager_failed_attempts.pop(client_ip, None)
 
 
 def _clean_text(value: Any, default: str, max_length: int) -> str:

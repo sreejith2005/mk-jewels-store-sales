@@ -47,6 +47,11 @@ RULES YOU MUST FOLLOW:
     model download, DB migration), call it out explicitly in a section called
     DEPLOYMENT NOTES so it is not missed when pulling to production.
 
+12. DEPLOYMENT NOTES must include the EXACT pip install command if any new
+    package was added to requirements.txt. Format:
+       source venv/bin/activate && pip install -r requirements.txt
+    Do not just say 'install new dependencies' — give the exact command.
+
 Local dev uses SQLite (sessions.db). Production uses Supabase.
 Do not run seed.py without explicit instruction — data is already in Supabase.
 

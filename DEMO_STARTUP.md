@@ -1,5 +1,26 @@
 # MK Jewels Demo Startup
 
+# These is the quick reference step for demo -> Production
+MAKE CHANGE:
+  → Codex locally → pytest passes → npm build passes → git push
+
+DEPLOY:
+  → ssh into server
+  → git pull origin main
+  → pip install (if requirements changed)
+  → npm run build + pm2 restart (if frontend changed)
+  → sudo systemctl restart mkjewels (if backend changed)
+
+CHECK LOGS:
+  → sudo journalctl -u mkjewels -n 50 --no-pager
+  → pm2 logs mkjewels-dashboard
+
+CHECK SERVICES:
+  → sudo systemctl status mkjewels
+  → pm2 status
+  → ollama list
+  → curl http://localhost:11434/api/tags
+
 Use these steps from PowerShell at the repo root:
 
 ```powershell

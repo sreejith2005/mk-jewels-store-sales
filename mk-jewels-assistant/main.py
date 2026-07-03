@@ -51,6 +51,8 @@ def resolve_run_mode(
 
 
 def main(argv: list[str] | None = None):
+    Config.validate_pipeline()
+
     run_mode = resolve_run_mode(argv)
 
     if run_mode == "3":
