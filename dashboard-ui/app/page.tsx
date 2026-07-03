@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   AlertTriangle,
   ArrowLeft,
+  Award,
   Bell,
   Building2,
   CheckCircle2,
@@ -13,10 +14,13 @@ import {
   KeyRound,
   LayoutDashboard,
   MessageSquareText,
+  Minus,
   ReceiptText,
   Search,
   Store as StoreIcon,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -49,7 +53,7 @@ type Salesperson = {
   created_at?: string;
 };
 
-type DashboardView = "stores" | "pin-management" | "reports" | "alerts";
+type DashboardView = "stores" | "pin-management" | "reports" | "alerts" | "scores";
 type ConversationMode = "live" | "full";
 
 type Session = {
@@ -95,6 +99,29 @@ type CoachingReport = {
   text?: string;
   content?: string;
   created_at?: string;
+};
+
+type SessionScore = {
+  id?: number;
+  session_id: string;
+  salesperson_name: string;
+  store_name: string;
+  greeting_score: number;
+  product_knowledge_score: number;
+  objection_handling_score: number;
+  missed_oppurtuinity: number;
+  upsell_score: number;
+  closing_score: number;
+  overall_score: number;
+  score_reasoning?: string;
+  customer_satisfaction?: "Positive" | "Neutral" | "Negative" | string;
+  created_at?: string;
+};
+
+type LeaderboardRow = {
+  name: string;
+  avg_overall: number;
+  session_count: number;
 };
 
 type FeedbackValue = "useful" | "false_alarm" | "noted";
@@ -150,6 +177,26 @@ const feedbackOptions: Array<{ value: FeedbackValue; label: string }> = [
   { value: "useful", label: "Useful" },
   { value: "false_alarm", label: "False Alarm" },
   { value: "noted", label: "Noted" },
+];
+
+const scoreDimensions: Array<{
+  key: keyof Pick<
+    SessionScore,
+    | "greeting_score"
+    | "product_knowledge_score"
+    | "objection_handling_score"
+    | "missed_oppurtuinity"
+    | "upsell_score"
+    | "closing_score"
+  >;
+  label: string;
+}> = [
+  { key: "greeting_score", label: "Greeting & Opening" },
+  { key: "product_knowledge_score", label: "Product Knowledge" },
+  { key: "objection_handling_score", label: "Objection Handling" },
+  { key: "missed_oppurtuinity", label: "Missed Oppurtuinity" },
+  { key: "upsell_score", label: "Upsell Attempts / Cross-Selling" },
+  { key: "closing_score", label: "Closing Ability" },
 ];
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -229,6 +276,45 @@ function fetchReports(salespersonName: string) {
   return fetchJson<CoachingReport[]>(
     `${API_BASE}/api/reports/${encodeURIComponent(salespersonName)}`,
   );
+}
+
+function fetchSessionScore(sessionId: string) {
+  return fetchJson<SessionScore>(
+    `${API_BASE}/api/scores/session/${encodeURIComponent(sessionId)}`,
+  );
+}
+
+function fetchSalespersonScores(salespersonName: string, days = 30) {
+  return fetchJson<SessionScore[]>(
+    `${API_BASE}/api/scores/salesperson/${encodeURIComponent(salespersonName)}?days=${encodeURIComponent(days)}`,
+  );
+}
+
+function fetchStoreLeaderboard(storeId: number) {
+  return fetchJson<LeaderboardRow[]>(
+    `${API_BASE}/api/scores/leaderboard/${encodeURIComponent(storeId)}`,
+  );
+}
+
+async function generateSessionScore(sessionId: string) {
+  const response = await fetch(
+    `${API_BASE}/api/scores/generate/${encodeURIComponent(sessionId)}`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...basicAuthHeader(),
+      },
+    },
+  );
+
+  const payload = await response.json().catch(() => null) as SessionScore | { error?: string } | null;
+  if (!response.ok) {
+    throw new Error((payload as { error?: string } | null)?.error ?? `${response.status} ${response.statusText}`);
+  }
+
+  return payload as SessionScore;
 }
 
 async function deleteSession(sessionId: string) {
@@ -502,6 +588,9 @@ export default function Page() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [sessionSelectionPaused, setSessionSelectionPaused] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [sessionScore, setSessionScore] = useState<SessionScore | null>(null);
+  const [isLoadingSessionScore, setIsLoadingSessionScore] = useState(false);
+  const [isGeneratingSessionScore, setIsGeneratingSessionScore] = useState(false);
   const [savedFeedbackIds, setSavedFeedbackIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -624,6 +713,7 @@ export default function Page() {
         renderedEventIdsRef.current = new Set();
         setEvents([]);
         setStats(emptyStats);
+        setSessionScore(null);
         setLastUpdated(new Date());
         return;
       }
@@ -649,6 +739,42 @@ export default function Page() {
     }
   }, [selectedSalesperson, selectedSession, selectedStore, sessionSelectionPaused]);
 
+  const loadSelectedSessionScore = useCallback(async () => {
+    if (!selectedSession) {
+      setSessionScore(null);
+      return;
+    }
+
+    setIsLoadingSessionScore(true);
+    try {
+      const score = await fetchSessionScore(selectedSession.session_id);
+      setSessionScore(score);
+    } catch {
+      setSessionScore(null);
+    } finally {
+      setIsLoadingSessionScore(false);
+    }
+  }, [selectedSession]);
+
+  const generateSelectedSessionScore = useCallback(async () => {
+    if (!selectedSession) {
+      return;
+    }
+
+    setIsGeneratingSessionScore(true);
+    setError(null);
+    try {
+      const score = await generateSessionScore(selectedSession.session_id);
+      setSessionScore(score);
+    } catch (generateError) {
+      setError(
+        generateError instanceof Error ? generateError.message : "Score generation failed",
+      );
+    } finally {
+      setIsGeneratingSessionScore(false);
+    }
+  }, [selectedSession]);
+
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => void loadStores(), 0);
 
@@ -656,6 +782,11 @@ export default function Page() {
       window.clearTimeout(initialRefresh);
     };
   }, [loadStores]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void loadSelectedSessionScore(), 0);
+    return () => window.clearTimeout(timeout);
+  }, [loadSelectedSessionScore]);
 
   useEffect(() => {
     if (!selectedStore || selectedSalesperson) {
@@ -777,6 +908,7 @@ export default function Page() {
         renderedEventIdsRef.current = new Set();
         setEvents([]);
         setStats(emptyStats);
+        setSessionScore(null);
         setLastUpdated(new Date());
       }
     },
@@ -792,6 +924,7 @@ export default function Page() {
     renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
   };
 
@@ -802,6 +935,7 @@ export default function Page() {
     renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
   };
 
@@ -816,6 +950,7 @@ export default function Page() {
     setStoreSessions([]);
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
     void loadStores();
   };
@@ -834,6 +969,7 @@ export default function Page() {
     renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
     setError(null);
   };
@@ -847,6 +983,21 @@ export default function Page() {
     renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
+    setLastUpdated(null);
+    setError(null);
+  };
+
+  const openScores = () => {
+    setView("scores");
+    setSelectedStore(null);
+    setSelectedSalesperson(null);
+    setSelectedSession(null);
+    setSessionSelectionPaused(false);
+    renderedEventIdsRef.current = new Set();
+    setEvents([]);
+    setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
     setError(null);
   };
@@ -858,6 +1009,7 @@ export default function Page() {
     renderedEventIdsRef.current = new Set();
     setEvents([]);
     setStats(emptyStats);
+    setSessionScore(null);
     setLastUpdated(null);
     if (selectedStore) {
       void loadSalespersons(selectedStore);
@@ -877,6 +1029,7 @@ export default function Page() {
           onSelectAlerts={openAlerts}
           onSelectPinManagement={openPinManagement}
           onSelectReports={openReports}
+          onSelectScores={openScores}
           onSelectStores={backToStores}
           selectedSalesperson={selectedSalesperson}
           selectedStore={selectedStore}
@@ -905,6 +1058,8 @@ export default function Page() {
               <ReportsView stores={stores} />
             ) : view === "alerts" ? (
               <AlertsView />
+            ) : view === "scores" ? (
+              <ScoresView stores={stores} />
             ) : !selectedStore ? (
               <StoreSelection
                 activeCounts={storeActiveCounts}
@@ -932,7 +1087,11 @@ export default function Page() {
                 onSelectSession={selectSession}
                 savedFeedbackIds={savedFeedbackIds}
                 salesperson={selectedSalesperson}
+                sessionScore={sessionScore}
                 selectedSession={selectedSession}
+                isGeneratingSessionScore={isGeneratingSessionScore}
+                isLoadingSessionScore={isLoadingSessionScore}
+                onGenerateSessionScore={generateSelectedSessionScore}
                 stats={stats}
                 store={selectedStore}
                 storeSessions={storeSessions}
@@ -951,6 +1110,7 @@ function DashboardSidebar({
   onSelectAlerts,
   onSelectPinManagement,
   onSelectReports,
+  onSelectScores,
   onSelectStores,
   selectedSalesperson,
   selectedStore,
@@ -960,6 +1120,7 @@ function DashboardSidebar({
   onSelectAlerts: () => void;
   onSelectPinManagement: () => void;
   onSelectReports: () => void;
+  onSelectScores: () => void;
   onSelectStores: () => void;
   selectedSalesperson: Salesperson | null;
   selectedStore: Store | null;
@@ -973,6 +1134,7 @@ function DashboardSidebar({
       action: activeView === "stores" && selectedStore ? undefined : onSelectStores,
     },
     { label: "PIN Management", icon: KeyRound, active: activeView === "pin-management", action: onSelectPinManagement },
+    { label: "Scores", icon: Award, active: activeView === "scores", action: onSelectScores },
     { label: "Reports", icon: LayoutDashboard, active: activeView === "reports", action: onSelectReports },
     { label: "Alerts Log", icon: Bell, active: activeView === "alerts", action: onSelectAlerts },
   ];
@@ -1024,6 +1186,8 @@ function DashboardSidebar({
           <p className="mt-2 text-sm font-medium text-zinc-100">
             {activeView === "pin-management"
               ? "Salesperson PINs"
+              : activeView === "scores"
+                ? "Sales Scores"
               : activeView === "reports"
                 ? "Coaching Reports"
                 : activeView === "alerts"
@@ -1057,6 +1221,8 @@ function DashboardTopbar({
   const istTime = useIstTime();
   const breadcrumb = activeView === "pin-management"
     ? ["PIN Management"]
+    : activeView === "scores"
+      ? ["Scores"]
     : activeView === "reports"
       ? ["Reports"]
       : activeView === "alerts"
@@ -1075,6 +1241,8 @@ function DashboardTopbar({
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
             {activeView === "pin-management"
               ? "PIN Management"
+              : activeView === "scores"
+                ? "Scores"
               : activeView === "reports"
                 ? "Coaching Reports"
                 : activeView === "alerts"
@@ -1517,6 +1685,241 @@ function ReportsView({ stores }: { stores: Store[] }) {
   );
 }
 
+function ScoresView({ stores }: { stores: Store[] }) {
+  const [selectedStoreId, setSelectedStoreId] = useState<number | "">(
+    stores[0]?.id ?? "",
+  );
+  const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [salespersonScores, setSalespersonScores] = useState<Record<string, SessionScore[]>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const effectiveStoreId = selectedStoreId || stores[0]?.id || "";
+
+  useEffect(() => {
+    if (!effectiveStoreId) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    fetchStoreLeaderboard(Number(effectiveStoreId))
+      .then((rows) => {
+        if (!cancelled) {
+          setLeaderboard(rows);
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Scores failed to load");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveStoreId]);
+
+  const toggleSalesperson = async (name: string) => {
+    if (expandedName === name) {
+      setExpandedName(null);
+      return;
+    }
+
+    setExpandedName(name);
+    if (salespersonScores[name]) {
+      return;
+    }
+
+    try {
+      const scores = await fetchSalespersonScores(name, 90);
+      setSalespersonScores((previous) => ({ ...previous, [name]: scores }));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Salesperson scores failed to load");
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-5">
+      <SectionIntro
+        eyebrow="Scores"
+        title="Salesperson scoring"
+        description="Compare completed sessions by AI-scored sales behavior and review recent score history."
+      />
+
+      <Card className="border-white/10 bg-[var(--mk-surface)] shadow-none">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <label className="text-sm text-zinc-400" htmlFor="score-store">
+            Store
+          </label>
+          <select
+            id="score-store"
+            value={effectiveStoreId}
+            onChange={(event) => {
+              setSelectedStoreId(event.target.value ? Number(event.target.value) : "");
+              setExpandedName(null);
+            }}
+            className="min-h-10 rounded-md border border-white/10 bg-black/30 px-3 text-sm text-zinc-100 outline-none transition focus:border-[var(--mk-gold)]/60"
+          >
+            {stores.length === 0 ? <option value="">No stores found</option> : null}
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </CardContent>
+      </Card>
+
+      {error ? (
+        <div className="rounded-lg border border-red-400/25 bg-red-500/10 p-3 text-sm text-red-100">
+          {error}
+        </div>
+      ) : null}
+
+      <Card className="border-white/10 bg-[var(--mk-surface)] shadow-none">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+            <Award className="size-4 text-[var(--mk-gold)]" />
+            Leaderboard
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <EmptyState>Loading scores...</EmptyState>
+          ) : leaderboard.length === 0 ? (
+            <EmptyState>No scored sessions found for this store yet.</EmptyState>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="border-b border-white/10 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                  <tr>
+                    <th className="py-3 pr-4 font-medium">Rank</th>
+                    <th className="py-3 pr-4 font-medium">Name</th>
+                    <th className="py-3 pr-4 font-medium">Avg Score</th>
+                    <th className="py-3 pr-4 font-medium">Sessions Scored</th>
+                    <th className="py-3 pr-4 font-medium">Trend</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {leaderboard.map((row, index) => {
+                    const scores = salespersonScores[row.name] ?? [];
+                    const trend = calculateScoreTrend(scores);
+                    const isExpanded = expandedName === row.name;
+
+                    return (
+                      <tr key={row.name} className="align-top">
+                        <td className="py-3 pr-4 text-zinc-400">{index + 1}</td>
+                        <td className="py-3 pr-4">
+                          <button
+                            type="button"
+                            onClick={() => void toggleSalesperson(row.name)}
+                            className="font-medium text-zinc-100 transition hover:text-[var(--mk-gold-light)]"
+                          >
+                            {row.name}
+                          </button>
+                          {isExpanded ? (
+                            <RecentScoreList scores={scores.slice(0, 10)} />
+                          ) : null}
+                        </td>
+                        <td className="py-3 pr-4 font-semibold tabular-nums text-[var(--mk-gold)]">
+                          {Number(row.avg_overall).toFixed(1)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums text-zinc-300">
+                          {row.session_count}
+                        </td>
+                        <td className="py-3 pr-4">
+                          <TrendBadge trend={trend} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function RecentScoreList({ scores }: { scores: SessionScore[] }) {
+  if (scores.length === 0) {
+    return <p className="mt-3 text-xs text-zinc-500">Loading recent sessions...</p>;
+  }
+
+  return (
+    <div className="mt-3 grid max-w-xl gap-2">
+      {scores.map((score) => (
+        <div
+          key={score.session_id}
+          className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs"
+        >
+          <span className="text-zinc-400">{formatTimestamp(score.created_at)}</span>
+          <span className="font-semibold tabular-nums text-zinc-100">
+            {Number(score.overall_score).toFixed(1)} / 10
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function calculateScoreTrend(scores: SessionScore[]) {
+  if (scores.length < 6) {
+    return 0;
+  }
+
+  const recent = scores.slice(0, 5);
+  const previous = scores.slice(5, 10);
+  if (previous.length === 0) {
+    return 0;
+  }
+
+  return averageScore(recent) - averageScore(previous);
+}
+
+function averageScore(scores: SessionScore[]) {
+  if (scores.length === 0) {
+    return 0;
+  }
+  return scores.reduce((total, score) => total + Number(score.overall_score || 0), 0) / scores.length;
+}
+
+function TrendBadge({ trend }: { trend: number }) {
+  if (trend > 0.2) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-100">
+        <TrendingUp className="size-3.5" />
+        Up
+      </span>
+    );
+  }
+
+  if (trend < -0.2) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-red-300/20 bg-red-400/10 px-2.5 py-1 text-xs text-red-100">
+        <TrendingDown className="size-3.5" />
+        Down
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-300">
+      <Minus className="size-3.5" />
+      Flat
+    </span>
+  );
+}
+
 function PinManagementView({ stores }: { stores: Store[] }) {
   const [selectedStoreId, setSelectedStoreId] = useState<string>("all");
   const [pinSalespersons, setPinSalespersons] = useState<Salesperson[]>([]);
@@ -1824,9 +2227,13 @@ function ConversationView({
   onDeleteSession,
   onSaveFeedback,
   onSelectSession,
+  onGenerateSessionScore,
   savedFeedbackIds,
   salesperson,
+  sessionScore,
   selectedSession,
+  isGeneratingSessionScore,
+  isLoadingSessionScore,
   stats,
   store,
   storeSessions,
@@ -1838,9 +2245,13 @@ function ConversationView({
   onDeleteSession: (sessionId: string) => Promise<void>;
   onSaveFeedback: (eventId: number, feedback: FeedbackValue) => Promise<void>;
   onSelectSession: (session: Session) => Promise<void>;
+  onGenerateSessionScore: () => Promise<void>;
   savedFeedbackIds: Set<number>;
   salesperson: Salesperson;
+  sessionScore: SessionScore | null;
   selectedSession: Session | null;
+  isGeneratingSessionScore: boolean;
+  isLoadingSessionScore: boolean;
   stats: Stats;
   store: Store;
   storeSessions: Session[];
@@ -2090,6 +2501,14 @@ function ConversationView({
               ref={transcriptContainerRef}
               className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]"
             >
+              <SessionScoreCard
+                isGenerating={isGeneratingSessionScore}
+                isLoading={isLoadingSessionScore}
+                onGenerate={onGenerateSessionScore}
+                score={sessionScore}
+                selectedSession={selectedSession}
+              />
+
               {!selectedSession ? (
                 <EmptyState>No transcript session exists for this salesperson yet.</EmptyState>
               ) : events.length === 0 ? (
@@ -2123,6 +2542,99 @@ function ConversationView({
         </div>
       </div>
     </section>
+  );
+}
+
+function SessionScoreCard({
+  isGenerating,
+  isLoading,
+  onGenerate,
+  score,
+  selectedSession,
+}: {
+  isGenerating: boolean;
+  isLoading: boolean;
+  onGenerate: () => Promise<void>;
+  score: SessionScore | null;
+  selectedSession: Session | null;
+}) {
+  return (
+    <section className="rounded-lg border border-white/10 bg-black/25 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-100">Session Score</h3>
+          {score ? (
+            <p className="mt-1 text-4xl font-semibold tabular-nums text-[var(--mk-gold)]">
+              {Number(score.overall_score).toFixed(1)} / 10
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-zinc-500">
+              {isLoading ? "Checking score..." : "Score pending..."}
+            </p>
+          )}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!selectedSession || isGenerating}
+          onClick={() => void onGenerate()}
+          className="min-h-9 border-white/10 bg-transparent text-xs text-zinc-300 hover:border-[var(--mk-gold)]/50 hover:bg-[var(--mk-gold)]/10 hover:text-[var(--mk-gold-light)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isGenerating ? "Generating" : "Generate Score Now"}
+        </Button>
+      </div>
+
+      {score ? (
+        <>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {scoreDimensions.map((dimension) => (
+              <ScoreBar
+                key={dimension.key}
+                label={dimension.label}
+                value={Number(score[dimension.key] ?? 0)}
+              />
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+            <span>Customer Satisfaction: {score.customer_satisfaction ?? "Neutral"}</span>
+            {score.created_at ? <span>Scored {formatTimestamp(score.created_at)}</span> : null}
+          </div>
+          {score.score_reasoning ? (
+            <p className="mt-3 text-sm italic leading-6 text-zinc-400">
+              {score.score_reasoning}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-500">
+          Scores are generated when the session ends
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ScoreBar({ label, value }: { label: string; value: number }) {
+  const clampedValue = Math.max(0, Math.min(Number(value) || 0, 10));
+  const fillClass = clampedValue >= 7
+    ? "bg-[var(--mk-gold)]"
+    : clampedValue >= 5
+      ? "bg-amber-300"
+      : "bg-red-400";
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <span className="text-sm text-zinc-300">{label}</span>
+        <span className="font-semibold tabular-nums text-zinc-100">{clampedValue} / 10</span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div
+          className={cn("h-full rounded-full", fillClass)}
+          style={{ width: `${clampedValue * 10}%` }}
+        />
+      </div>
+    </div>
   );
 }
 

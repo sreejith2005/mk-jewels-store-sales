@@ -186,6 +186,37 @@ class Database:
                             )
                             """
                         )
+                        cursor.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS session_scores (
+                                id SERIAL PRIMARY KEY,
+                                session_id TEXT REFERENCES sessions(id),
+                                salesperson_name TEXT,
+                                store_name TEXT,
+                                greeting_score INTEGER,
+                                product_knowledge_score INTEGER,
+                                objection_handling_score INTEGER,
+                                missed_oppurtuinity INTEGER,
+                                upsell_score INTEGER,
+                                closing_score INTEGER,
+                                overall_score REAL,
+                                score_reasoning TEXT,
+                                customer_satisfaction TEXT,
+                                created_at TEXT
+                            )
+                            """
+                        )
+                        cursor.execute(
+                            """
+                            DO $$
+                            BEGIN
+                                ALTER TABLE session_scores
+                                ADD COLUMN customer_satisfaction TEXT DEFAULT 'Neutral';
+                            EXCEPTION WHEN duplicate_column THEN
+                                NULL;
+                            END $$;
+                            """
+                        )
                     connection.commit()
                 except Exception as exc:
                     connection.rollback()
@@ -300,6 +331,32 @@ class Database:
                 )
                 """
             )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT REFERENCES sessions(id),
+                    salesperson_name TEXT,
+                    store_name TEXT,
+                    greeting_score INTEGER,
+                    product_knowledge_score INTEGER,
+                    objection_handling_score INTEGER,
+                    missed_oppurtuinity INTEGER,
+                    upsell_score INTEGER,
+                    closing_score INTEGER,
+                    overall_score REAL,
+                    score_reasoning TEXT,
+                    customer_satisfaction TEXT,
+                    created_at TEXT
+                )
+                """
+            )
+            try:
+                self._connection.execute(
+                    "ALTER TABLE session_scores ADD COLUMN customer_satisfaction TEXT DEFAULT 'Neutral'"
+                )
+            except sqlite3.OperationalError:
+                pass
             self._connection.commit()
 
     def get_stores(self) -> list[dict]:
@@ -877,6 +934,250 @@ class Database:
 
         return [dict(row) for row in rows]
 
+    def save_session_score(
+        self,
+        session_id: str,
+        salesperson_name: str,
+        store_name: str,
+        scores_dict: dict[str, Any],
+    ) -> bool:
+        score_keys = [
+            "greeting_score",
+            "product_knowledge_score",
+            "objection_handling_score",
+            "missed_oppurtuinity",
+            "upsell_score",
+            "closing_score",
+        ]
+        scores = {key: self._clamp_score(scores_dict.get(key, 5)) for key in score_keys}
+        overall_score = round(sum(scores.values()) / len(score_keys), 1)
+        reasoning = str(scores_dict.get("score_reasoning", "")).strip()[:500]
+        customer_satisfaction = self._normalise_customer_satisfaction(
+            scores_dict.get("customer_satisfaction", "Neutral")
+        )
+        created_at = self._utc_now()
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM session_scores WHERE session_id = %s",
+                            (session_id,),
+                        )
+                        cursor.execute(
+                            """
+                            INSERT INTO session_scores (
+                                session_id,
+                                salesperson_name,
+                                store_name,
+                                greeting_score,
+                                product_knowledge_score,
+                                objection_handling_score,
+                                missed_oppurtuinity,
+                                upsell_score,
+                                closing_score,
+                                overall_score,
+                                score_reasoning,
+                                customer_satisfaction,
+                                created_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                session_id,
+                                salesperson_name,
+                                store_name,
+                                scores["greeting_score"],
+                                scores["product_knowledge_score"],
+                                scores["objection_handling_score"],
+                                scores["missed_oppurtuinity"],
+                                scores["upsell_score"],
+                                scores["closing_score"],
+                                overall_score,
+                                reasoning,
+                                customer_satisfaction,
+                                created_at,
+                            ),
+                        )
+                    connection.commit()
+                    return True
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to save session score.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            self._connection.execute(
+                "DELETE FROM session_scores WHERE session_id = ?",
+                (session_id,),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO session_scores (
+                    session_id,
+                    salesperson_name,
+                    store_name,
+                    greeting_score,
+                    product_knowledge_score,
+                    objection_handling_score,
+                    missed_oppurtuinity,
+                    upsell_score,
+                    closing_score,
+                    overall_score,
+                    score_reasoning,
+                    customer_satisfaction,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    salesperson_name,
+                    store_name,
+                    scores["greeting_score"],
+                    scores["product_knowledge_score"],
+                    scores["objection_handling_score"],
+                    scores["missed_oppurtuinity"],
+                    scores["upsell_score"],
+                    scores["closing_score"],
+                    overall_score,
+                    reasoning,
+                    customer_satisfaction,
+                    created_at,
+                ),
+            )
+            self._connection.commit()
+
+        return True
+
+    def get_session_score(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT *
+                            FROM session_scores
+                            WHERE session_id = %s
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 1
+                            """,
+                            (session_id,),
+                        )
+                        rows = self._rows_to_dicts(cursor.description, cursor.fetchall())
+                        return rows[0] if rows else None
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch session score.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            row = self._connection.execute(
+                """
+                SELECT *
+                FROM session_scores
+                WHERE session_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+
+        return dict(row) if row else None
+
+    def get_salesperson_scores(
+        self,
+        salesperson_name: str,
+        days: int = 30,
+    ) -> list[dict[str, Any]]:
+        days = max(1, min(days, 365))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT *
+                            FROM session_scores
+                            WHERE salesperson_name = %s
+                                AND created_at >= %s
+                            ORDER BY created_at DESC, id DESC
+                            """,
+                            (salesperson_name, cutoff),
+                        )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch salesperson scores.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT *
+                FROM session_scores
+                WHERE salesperson_name = ?
+                    AND created_at >= ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (salesperson_name, cutoff),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def get_store_leaderboard(self, store_id: int) -> list[dict[str, Any]]:
+        store_name = self.get_store_name(store_id)
+        if not store_name:
+            return []
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            SELECT
+                                salesperson_name AS name,
+                                AVG(overall_score) AS avg_overall,
+                                COUNT(*) AS session_count
+                            FROM session_scores
+                            WHERE store_name = %s
+                            GROUP BY salesperson_name
+                            ORDER BY AVG(overall_score) DESC, salesperson_name ASC
+                            """,
+                            (store_name,),
+                        )
+                        return self._rows_to_dicts(cursor.description, cursor.fetchall())
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to fetch store leaderboard.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            rows = self._connection.execute(
+                """
+                SELECT
+                    salesperson_name AS name,
+                    AVG(overall_score) AS avg_overall,
+                    COUNT(*) AS session_count
+                FROM session_scores
+                WHERE store_name = ?
+                GROUP BY salesperson_name
+                ORDER BY AVG(overall_score) DESC, salesperson_name ASC
+                """,
+                (store_name,),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and its transcript events atomically."""
         with self._lock:
@@ -884,6 +1185,10 @@ class Database:
                 connection = self._pool.getconn()
                 try:
                     with connection.cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM session_scores WHERE session_id = %s",
+                            (session_id,),
+                        )
                         cursor.execute(
                             "DELETE FROM events WHERE session_id = %s",
                             (session_id,),
@@ -903,6 +1208,10 @@ class Database:
 
             try:
                 self._connection.execute("BEGIN")
+                self._connection.execute(
+                    "DELETE FROM session_scores WHERE session_id = ?",
+                    (session_id,),
+                )
                 self._connection.execute(
                     "DELETE FROM events WHERE session_id = ?",
                     (session_id,),
@@ -1294,6 +1603,23 @@ class Database:
     @staticmethod
     def _as_int(value: Any) -> int:
         return int(bool(value))
+
+    @staticmethod
+    def _clamp_score(value: Any) -> int:
+        try:
+            score = int(value)
+        except (TypeError, ValueError):
+            return 5
+        return max(0, min(score, 10))
+
+    @staticmethod
+    def _normalise_customer_satisfaction(value: Any) -> str:
+        text = str(value or "Neutral").strip().lower()
+        if text == "positive":
+            return "Positive"
+        if text == "negative":
+            return "Negative"
+        return "Neutral"
 
     @staticmethod
     def _rows_to_dicts(description: Iterable[Any], rows: Iterable[tuple[Any, ...]]):

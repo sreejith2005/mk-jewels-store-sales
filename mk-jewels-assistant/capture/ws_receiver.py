@@ -17,6 +17,7 @@ from config import Config
 from core.exceptions import PipelineError
 from core.logger import get_logger
 from pipeline.session import TRIAGE_FN, Session
+from scoring.session_scoring import generate_and_save_session_score
 from storage.db import Database
 from transcription.gemini_stt import GeminiAPIError
 
@@ -65,6 +66,7 @@ class _DirectAudioSession(Session):
 
         self._executor.shutdown(wait=False, cancel_futures=True)
         self.db.close_session(self.session_id)
+        self._queue_score_generation()
         self.db.close()
 
     def submit_audio_chunk(self, audio_bytes: bytes):
@@ -117,6 +119,22 @@ class _DirectAudioSession(Session):
                 event,
                 store_name=self.store_name,
                 event_id=event_id,
+            )
+
+    def _queue_score_generation(self):
+        threading.Thread(
+            target=self._generate_score_safely,
+            daemon=True,
+        ).start()
+
+    def _generate_score_safely(self):
+        try:
+            generate_and_save_session_score(self.session_id)
+        except Exception as error:
+            logger.warning(
+                "Background score generation failed for %s: %s",
+                self.session_id,
+                error,
             )
 
 

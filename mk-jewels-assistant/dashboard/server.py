@@ -4,6 +4,7 @@ import hmac
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ DASHBOARD_ROOT = Path(__file__).resolve().parent
 from alerting.console_alert import AlertManager  # noqa: E402
 from config import Config  # noqa: E402
 from core.logger import get_logger  # noqa: E402
+from scoring.session_scoring import generate_and_save_session_score  # noqa: E402
 from storage.db import Database  # noqa: E402
 
 
@@ -259,6 +261,48 @@ def get_stats(session_id: str):
 @app.get("/api/reports/<salesperson_name>")
 def get_reports(salesperson_name: str):
     return jsonify(db.get_recent_reports(salesperson_name, days=7))
+
+
+@app.get("/api/scores/session/<session_id>")
+def get_session_score(session_id: str):
+    score = db.get_session_score(session_id)
+    if score is None:
+        return jsonify({"error": "Session score not found"}), 404
+    return jsonify(score)
+
+
+@app.get("/api/scores/salesperson/<salesperson_name>")
+def get_salesperson_scores(salesperson_name: str):
+    days = request.args.get("days", default=30, type=int)
+    return jsonify(db.get_salesperson_scores(salesperson_name, days=days))
+
+
+@app.get("/api/scores/leaderboard/<int:store_id>")
+def get_score_leaderboard(store_id: int):
+    return jsonify(db.get_store_leaderboard(store_id))
+
+
+@app.post("/api/scores/generate/<session_id>")
+def generate_session_score(session_id: str):
+    try:
+        score = generate_and_save_session_score(session_id, db=db)
+    except Exception as error:
+        logger.exception("Manual score generation failed for %s.", session_id)
+        return jsonify({"error": str(error)}), 500
+
+    if score is None:
+        return jsonify({"error": "Session has no transcript events to score"}), 404
+    return jsonify(score)
+
+
+def queue_session_score_generation(session_id: str) -> None:
+    def worker():
+        try:
+            generate_and_save_session_score(session_id)
+        except Exception as error:
+            logger.warning("Background score generation failed for %s: %s", session_id, error)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _clean_text(value: Any, default: str, max_length: int) -> str:

@@ -100,6 +100,37 @@ USER_PROMPT_TEMPLATE = (
     "reasoning (string, max 20 words)."
 )
 
+SESSION_SCORE_PROMPT_TEMPLATE = (
+    "You are a jewelry sales coach evaluating a salesperson's performance.\n"
+    "Here is the full sales conversation transcript:\n\n"
+    "{full_transcript}\n\n"
+    "Score {salesperson_name} on each dimension from 0-10.\n"
+    "Base scores on what actually happened in the transcript.\n"
+    "Be fair but honest - a score of 5 means average, not bad.\n"
+    "7+ means good, 9+ means excellent, below 4 means needs improvement.\n\n"
+    "Return ONLY this JSON, no other text:\n"
+    "{{\n"
+    '  "greeting_score": <int 0-10>,\n'
+    '  "product_knowledge_score": <int 0-10>,\n'
+    '  "objection_handling_score": <int 0-10>,\n'
+    '  "missed_oppurtuinity": <int 0-10>,\n'
+    '  "upsell_score": <int 0-10>,\n'
+    '  "closing_score": <int 0-10>,\n'
+    '  "customer_satisfaction": "<Positive|Neutral|Negative>",\n'
+    '  "score_reasoning": "<max 50 words>"\n'
+    "}}\n\n"
+    "If the transcript is too short to evaluate a dimension, score it 5 (neutral)."
+)
+
+SCORE_KEYS = (
+    "greeting_score",
+    "product_knowledge_score",
+    "objection_handling_score",
+    "missed_oppurtuinity",
+    "upsell_score",
+    "closing_score",
+)
+
 
 def _normalise_text(text: str) -> str:
     return " ".join(text.lower().replace("-", " ").replace("_", " ").split())
@@ -185,6 +216,32 @@ def _validate_triage_result(result: dict[str, Any]) -> dict:
         raise TriageError(str(error)) from error
 
 
+def _clamp_score(value: Any) -> int:
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return 5
+    return max(0, min(score, 10))
+
+
+def _validate_score_result(result: dict[str, Any]) -> dict[str, Any]:
+    scores = {key: _clamp_score(result.get(key, 5)) for key in SCORE_KEYS}
+    satisfaction = str(result.get("customer_satisfaction", "Neutral")).strip().lower()
+    if satisfaction == "positive":
+        customer_satisfaction = "Positive"
+    elif satisfaction == "negative":
+        customer_satisfaction = "Negative"
+    else:
+        customer_satisfaction = "Neutral"
+
+    reasoning_words = str(result.get("score_reasoning", "")).strip().split()
+    return {
+        **scores,
+        "customer_satisfaction": customer_satisfaction,
+        "score_reasoning": " ".join(reasoning_words[:50]),
+    }
+
+
 def _empty_event() -> dict:
     return _validate_triage_result(
         {
@@ -243,6 +300,45 @@ def triage(transcript: str, salesperson_name: str) -> dict:
     result = _parse_json_response(raw_text)
     result["transcript"] = transcript
     return _validate_triage_result(result)
+
+
+def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]:
+    """Score a full completed session transcript with Qwen3 via Ollama."""
+    transcript_text = full_transcript.strip()
+    if not transcript_text:
+        logger.info("Skipping Qwen3 session scoring for empty transcript.")
+        return _validate_score_result({})
+
+    payload = {
+        "model": MODEL_NAME,
+        "stream": False,
+        "options": {"num_predict": 220, "temperature": 0},
+        "messages": [
+            {
+                "role": "user",
+                "content": SESSION_SCORE_PROMPT_TEMPLATE.format(
+                    full_transcript=transcript_text,
+                    salesperson_name=salesperson_name,
+                ),
+            },
+        ],
+    }
+
+    try:
+        response = requests.post(
+            f"{Config.OLLAMA_HOST}/api/chat",
+            json=payload,
+            timeout=(5, 90),
+        )
+        response.raise_for_status()
+    except requests.RequestException as error:
+        logger.error("Ollama session scoring request failed: %s", error)
+        raise TriageError(f"Ollama unreachable: {error}") from error
+
+    response_json = response.json()
+    raw_text = response_json["message"]["content"]
+    logger.info("Raw Qwen3 session score response: %s", raw_text)
+    return _validate_score_result(_parse_json_response(raw_text))
 
 
 if __name__ == "__main__":

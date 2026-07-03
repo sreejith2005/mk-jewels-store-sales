@@ -15,6 +15,7 @@ from alerting.console_alert import AlertManager
 from capture.mic_capture import MicCapture
 from config import Config
 from core.logger import get_logger
+from scoring.session_scoring import generate_and_save_session_score
 from storage.db import Database
 from transcription.gemini_stt import GeminiAPIError
 
@@ -88,6 +89,7 @@ class Session:
             if not self._thread.is_alive():
                 self._thread = None
         self.db.close_session(self.session_id)
+        self._queue_score_generation()
 
     def _transcription_loop(self):
         pending = set()
@@ -152,6 +154,22 @@ class Session:
         if self.on_event:
             self.on_event(self.salesperson_name, event)
 
+    def _queue_score_generation(self):
+        threading.Thread(
+            target=self._generate_score_safely,
+            daemon=True,
+        ).start()
+
+    def _generate_score_safely(self):
+        try:
+            generate_and_save_session_score(self.session_id)
+        except Exception as error:
+            logger.warning(
+                "Background score generation failed for %s: %s",
+                self.session_id,
+                error,
+            )
+
 
 class FileSession:
     def __init__(
@@ -192,6 +210,7 @@ class FileSession:
             if not self._thread.is_alive():
                 self._thread = None
         self.db.close_session(self.session_id)
+        self._queue_score_generation()
 
     def _file_processing_loop(self):
         try:
@@ -299,3 +318,19 @@ class FileSession:
 
         if self.on_event:
             self.on_event(self.salesperson_name, event)
+
+    def _queue_score_generation(self):
+        threading.Thread(
+            target=self._generate_score_safely,
+            daemon=True,
+        ).start()
+
+    def _generate_score_safely(self):
+        try:
+            generate_and_save_session_score(self.session_id)
+        except Exception as error:
+            logger.warning(
+                "Background score generation failed for %s: %s",
+                self.session_id,
+                error,
+            )

@@ -30,6 +30,36 @@ def event_dict():
     }
 
 
+def score_dict(overall_base: int = 7):
+    return {
+        "greeting_score": overall_base,
+        "product_knowledge_score": overall_base,
+        "objection_handling_score": overall_base,
+        "missed_oppurtuinity": overall_base,
+        "upsell_score": overall_base,
+        "closing_score": overall_base,
+        "customer_satisfaction": "Positive",
+        "score_reasoning": "Strong discovery and clear next steps.",
+    }
+
+
+def create_store(db, name="Bandra", slug="bandra"):
+    with db._lock:
+        db._connection.execute(
+            """
+            INSERT INTO stores (name, slug, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (name, slug, db._utc_now()),
+        )
+        store_id = db._connection.execute(
+            "SELECT id FROM stores WHERE slug = ?",
+            (slug,),
+        ).fetchone()["id"]
+        db._connection.commit()
+    return store_id
+
+
 def test_create_session_returns_non_empty_uuid(db):
     session_id = db.create_session("Maya")
 
@@ -274,3 +304,50 @@ def test_get_session_events_returns_empty_after_delete_session(db):
     db.delete_session(session_id)
 
     assert db.get_session_events(session_id) == []
+
+
+def test_save_session_score_and_get_session_score(db):
+    session_id = db.create_session("Maya")
+
+    saved = db.save_session_score(
+        session_id=session_id,
+        salesperson_name="Maya",
+        store_name="Bandra",
+        scores_dict=score_dict(8),
+    )
+    score = db.get_session_score(session_id)
+
+    assert saved is True
+    assert score is not None
+    assert score["session_id"] == session_id
+    assert score["salesperson_name"] == "Maya"
+    assert score["greeting_score"] == 8
+    assert score["overall_score"] == 8.0
+    assert score["customer_satisfaction"] == "Positive"
+
+
+def test_get_salesperson_scores_returns_correct_rows(db):
+    maya_session = db.create_session("Maya")
+    riya_session = db.create_session("Riya")
+    db.save_session_score(maya_session, "Maya", "Bandra", score_dict(8))
+    db.save_session_score(riya_session, "Riya", "Bandra", score_dict(6))
+
+    scores = db.get_salesperson_scores("Maya", days=30)
+
+    assert len(scores) == 1
+    assert scores[0]["session_id"] == maya_session
+    assert scores[0]["overall_score"] == 8.0
+
+
+def test_get_store_leaderboard_returns_correct_ranking(db):
+    store_id = create_store(db, name="Bandra", slug="bandra")
+    maya_session = db.create_session("Maya", store_id=store_id)
+    riya_session = db.create_session("Riya", store_id=store_id)
+    db.save_session_score(maya_session, "Maya", "Bandra", score_dict(9))
+    db.save_session_score(riya_session, "Riya", "Bandra", score_dict(6))
+
+    leaderboard = db.get_store_leaderboard(store_id)
+
+    assert [row["name"] for row in leaderboard] == ["Maya", "Riya"]
+    assert leaderboard[0]["avg_overall"] == 9.0
+    assert leaderboard[0]["session_count"] == 1
