@@ -1,33 +1,38 @@
 # MK Jewels Demo Startup
 
-# These is the quick reference step for DEMO -> PRODUCTION
+## Quick Reference: Dev → Production
+
+```
 MAKE CHANGE:
-  → Codex locally → pytest passes → npm build passes → git push
+  → Edit locally → pytest passes → npm build passes → git push
 
 DEPLOY:
-  → ssh into server
-  → git pull origin main
+  → ssh into server → git pull origin main
   → pip install (if requirements changed)
   → npm run build + pm2 restart (if frontend changed)
-  → sudo systemctl restart mkjewels (if backend changed)
+  → sudo systemctl restart mkjewels-backend.service (if backend changed)
 
 CHECK LOGS:
-  → sudo journalctl -u mkjewels -n 50 --no-pager
+  → sudo journalctl -u mkjewels-backend.service -n 50 --no-pager
   → pm2 logs mkjewels-dashboard
 
 CHECK SERVICES:
-  → sudo systemctl status mkjewels
+  → sudo systemctl status mkjewels-backend.service
   → pm2 status
-  → ollama list
-  → curl http://localhost:11434/api/tags
+```
 
-Use these steps from PowerShell.
+---
 
-## 1. Start the Backend API
+> [!IMPORTANT]
+> **Windows Port Note:** On this machine, Windows (`svchost`) reserves ports `5000` and `8765`. The `.env` file already overrides these to `FLASK_PORT=5001` and `WS_PORT=8766`. Do not change them back.
 
-Port `5000` is the default, but this machine may already have another Windows service listening on that port. For demos, use `5001`. 
+---
 
-Change directory to the backend folder (`mk-jewels-assistant`) so Python can resolve imports correctly, and run the Flask app using the parent directory's virtual environment:
+## Option A: Manager Dashboard (Flask API + Next.js UI)
+
+Open **two separate** PowerShell windows.
+
+### Window 1 — Backend Flask API
 
 ```powershell
 cd C:\Users\MIS\Downloads\mkjewels-store-tool\mk-jewels-assistant
@@ -35,28 +40,18 @@ $env:FLASK_APP = "dashboard.server:app"
 ..\venv\Scripts\flask.exe run --host 127.0.0.1 --port 5001 --no-debugger --no-reload
 ```
 
-Leave this terminal open.
-
-Quick health check from another PowerShell window:
+Leave this window open. Quick health check (from a new window):
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:5001/api/debug
 ```
 
-Expected shape:
+Expected response: `{"sessions": 2, "events": 10}` (numbers may vary).
 
-```json
-{"sessions":2,"events":10}
-```
-
-The numbers may differ depending on the current database.
-
-## 2. Start the Dashboard UI
-
-Open a second PowerShell window. 
+### Window 2 — Dashboard UI (Next.js)
 
 > [!NOTE]
-> If your PowerShell displays an execution policy error like `npm.ps1 cannot be loaded because running scripts is disabled on this system`, use **`npm.cmd`** instead of `npm`.
+> Use `npm.cmd` instead of `npm` — PowerShell blocks `npm.ps1` by default on this machine.
 
 ```powershell
 cd C:\Users\MIS\Downloads\mkjewels-store-tool\dashboard-ui
@@ -64,42 +59,49 @@ $env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:5001"
 npm.cmd run dev
 ```
 
-Leave this terminal open.
+Leave this window open, then open the dashboard in your browser:
 
-## 3. Open the Demo
-
-Open:
-
-```text
+```
 http://localhost:3000
 ```
 
-The dashboard should show the MK Jewels live store floor view, salesperson sessions, stats, and transcript events.
+### Stop Option A
 
-## Stop the Demo
-
-Press `Ctrl+C` in both terminals.
-
-If a process is stuck, find and stop it:
+Press `Ctrl+C` in both windows. If a process is stuck:
 
 ```powershell
 netstat -ano | Select-String ":3000|:5001"
 Stop-Process -Id <PID>
 ```
 
-## Optional: Phone Recorder Demo
+---
 
-From the backend folder:
+## Option B: Phone Recorder Demo (Live Capture)
+
+This starts Flask on port `5001` AND the WebSocket server on port `8766` (set via `.env`). Run everything from the backend folder:
 
 ```powershell
 cd C:\Users\MIS\Downloads\mkjewels-store-tool\mk-jewels-assistant
 ..\venv\Scripts\python.exe main.py
 ```
 
-Choose:
+When prompted:
 
-```text
-5
+```
+Run mode: (1) Live mic  (2) Test with audio file  (3) Start dashboard server  (4) Generate end-of-day report  (5) Start live phone capture: 5
 ```
 
-The app will print a recorder URL to open on the phone. Keep the terminal running while recording.
+Enter `5` and press Enter. The app will print a URL like:
+
+```
+Open this URL on your phone: http://192.168.x.x:5001/recorder?name=YourName
+```
+
+Open that URL on your phone (must be on same Wi-Fi). Keep this terminal running while recording.
+
+> [!NOTE]
+> If you see `OSError: [Errno 10048]` (address already in use), another instance is already running. Find and kill it:
+> ```powershell
+> netstat -ano | Select-String ":5001|:8766"
+> Stop-Process -Id <PID>
+> ```
