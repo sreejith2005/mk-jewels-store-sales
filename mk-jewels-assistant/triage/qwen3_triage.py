@@ -307,6 +307,14 @@ def triage(transcript: str, salesperson_name: str) -> dict:
         ],
     }
 
+    logger.info(
+        "Qwen3 triage request transcript for %s: %r",
+        salesperson_name,
+        transcript,
+    )
+
+    raw_response_text = ""
+    raw_text = ""
     try:
         response = requests.post(
             f"{Config.OLLAMA_HOST}/api/chat",
@@ -315,18 +323,37 @@ def triage(transcript: str, salesperson_name: str) -> dict:
         )
         response.raise_for_status()
     except requests.RequestException as error:
-        logger.error("Ollama request failed: %s", error)
+        logger.error(
+            "Ollama triage request failed. Raw transcript: %r",
+            transcript,
+            exc_info=True,
+        )
         raise TriageError(f"Ollama unreachable: {error}") from error
 
-    response_json = response.json()
-    raw_text = response_json["message"]["content"]
-    logger.info("Raw Qwen3 triage response: %s", raw_text)
-    result = _parse_json_response(raw_text)
-    result["raw_transcript"] = transcript
-    result["display_transcript"] = result.get("display_transcript") or transcript
-    result["transcript"] = result["display_transcript"]
-    result["triage_status"] = "ok"
-    return _validate_triage_result(result)
+    try:
+        raw_response_text = response.text
+        logger.info("Raw Qwen3 triage HTTP response: %s", raw_response_text)
+        response_json = response.json()
+        raw_text = response_json["message"]["content"]
+        logger.info("Raw Qwen3 triage response content: %s", raw_text)
+        result = _parse_json_response(raw_text)
+        result["raw_transcript"] = transcript
+        result["display_transcript"] = result.get("display_transcript") or transcript
+        result["transcript"] = result["display_transcript"]
+        result["triage_status"] = "ok"
+        return _validate_triage_result(result)
+    except (ValueError, KeyError, TypeError, TriageError) as error:
+        logger.error(
+            "Qwen3 triage response handling failed. Raw transcript: %r; "
+            "raw HTTP response: %r; raw content: %r",
+            transcript,
+            raw_response_text,
+            raw_text,
+            exc_info=True,
+        )
+        if isinstance(error, TriageError):
+            raise
+        raise TriageError(f"Invalid Qwen3 response: {error}") from error
 
 
 def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]:

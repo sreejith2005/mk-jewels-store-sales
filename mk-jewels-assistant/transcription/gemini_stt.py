@@ -139,10 +139,27 @@ def _fallback_or_raise(
 ) -> dict:
     if openrouter_fallback:
         try:
+            logger.info(
+                "OpenRouter fallback triage transcript for %s: %r",
+                salesperson_name,
+                transcript_text,
+            )
             return _triage_openrouter(transcript_text, salesperson_name)
         except TriageError:
+            logger.error(
+                "OpenRouter fallback triage failed for %s. Raw transcript: %r",
+                salesperson_name,
+                transcript_text,
+                exc_info=True,
+            )
             raise
         except Exception:
+            logger.error(
+                "OpenRouter fallback triage crashed for %s. Raw transcript: %r",
+                salesperson_name,
+                transcript_text,
+                exc_info=True,
+            )
             pass
     raise error
 

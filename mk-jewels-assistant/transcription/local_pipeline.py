@@ -56,8 +56,8 @@ def load_models() -> bool:
                 indic_conformer_stt.DEFAULT_DECODING,
             )
         logger.info("IndicConformer warmup completed in %.2fs", time.perf_counter() - stt_start)
-    except Exception as error:
-        logger.error("IndicConformer warmup failed: %s", error)
+    except Exception:
+        logger.critical("IndicConformer warmup failed.", exc_info=True)
         return False
 
     qwen_ready = False
@@ -87,13 +87,14 @@ def load_models() -> bool:
             qwen_ready = True
             logger.info("Qwen3 warmup OK in %.2fs", time.perf_counter() - qwen_start)
             break
-        except (requests.RequestException, RuntimeError, ValueError) as error:
-            logger.warning("Qwen3 warmup attempt %d failed: %s", attempt, error)
+        except (requests.RequestException, RuntimeError, ValueError):
+            logger.error("Qwen3 warmup attempt %d failed.", attempt, exc_info=True)
             if attempt == 1:
                 logger.info("Retrying Qwen3 warmup in 5 seconds")
                 time.sleep(5)
 
     if not qwen_ready:
+        logger.critical("Qwen3 warmup failed after all attempts.")
         return False
 
     _MODELS_WARMED_UP = True
@@ -207,8 +208,13 @@ def transcribe_and_triage(
 
         try:
             event = validate_event(qwen3_triage.triage(transcript, salesperson_name))
-        except TriageError as error:
-            logger.error("Triage failed for %s: %s", salesperson_name, error)
+        except TriageError:
+            logger.error(
+                "Triage failed for %s. Raw transcript passed to triage: %r",
+                salesperson_name,
+                transcript,
+                exc_info=True,
+            )
             return _empty_event(transcript, "triage failed")
 
         logger.info(

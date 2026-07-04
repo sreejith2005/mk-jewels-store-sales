@@ -20,7 +20,7 @@ DASHBOARD_ROOT = Path(__file__).resolve().parent
 from alerting.console_alert import AlertManager  # noqa: E402
 from config import Config  # noqa: E402
 from core.logger import get_logger  # noqa: E402
-from core.readiness import is_ready  # noqa: E402
+from core.readiness import is_ready, set_not_ready, set_ready  # noqa: E402
 from scoring.session_scoring import generate_and_save_session_score  # noqa: E402
 from storage.db import Database  # noqa: E402
 
@@ -31,6 +31,52 @@ db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
 STARTED_AT = time.time()
+_startup_thread_started = False
+
+
+def _verify_models_for_serving() -> None:
+    if Config.PIPELINE_MODE == "demo":
+        set_ready()
+        return
+
+    try:
+        from transcription.local_pipeline import load_models
+
+        if load_models():
+            set_ready()
+            return
+
+        set_not_ready()
+        logger.critical(
+            "Model startup verification failed; API requests will remain gated."
+        )
+    except Exception:
+        set_not_ready()
+        logger.critical(
+            "Model startup verification crashed; API requests will remain gated.",
+            exc_info=True,
+        )
+
+
+def _start_model_verification() -> None:
+    global _startup_thread_started
+    if _startup_thread_started or is_ready():
+        return
+    _startup_thread_started = True
+    threading.Thread(target=_verify_models_for_serving, daemon=True).start()
+
+
+_start_model_verification()
+
+
+@app.before_request
+def gate_api_until_models_ready() -> Any:
+    if request.method == "OPTIONS":
+        return None
+    if request.path.startswith("/api/") and not is_ready():
+        return jsonify({"error": "Server still starting up"}), 503
+
+    return None
 
 
 @app.before_request

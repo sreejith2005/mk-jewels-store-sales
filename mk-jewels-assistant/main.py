@@ -80,14 +80,17 @@ def main(argv: list[str] | None = None):
     Config.validate()
 
     if run_mode in {"1", "2", "5"}:
-        from core.readiness import set_ready, wait_until_ready
+        from core.readiness import set_not_ready, set_ready, wait_until_ready
         from transcription.local_pipeline import load_models
 
         logger.info("Loading models - server will not accept connections until ready")
         success = load_models()
         if not success:
-            logger.warning("Model warmup check failed - proceeding anyway")
-            logger.warning("Triage may fail on first few requests until Qwen3 warms up")
+            set_not_ready()
+            logger.critical(
+                "Model warmup check failed - aborting startup instead of serving half-loaded."
+            )
+            raise RuntimeError("Model warmup failed")
         set_ready()
         wait_until_ready(timeout=0)
         logger.info("All models loaded - starting servers")
