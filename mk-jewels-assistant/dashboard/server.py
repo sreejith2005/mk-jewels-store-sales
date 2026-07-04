@@ -30,7 +30,6 @@ CORS(app, origins=Config.CORS_ORIGINS.split(","))
 db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
-ACTIVE_TOKENS: dict[str, float] = {}
 STARTED_AT = time.time()
 
 
@@ -51,14 +50,14 @@ def require_auth() -> Any:
     if any(request.path.startswith(path) for path in public_paths):
         return None
 
+    logger.debug(
+        "Auth check: path=%s token_present=%s",
+        request.path,
+        bool(request.headers.get("X-Manager-Token")),
+    )
+
     token = request.headers.get("X-Manager-Token", "")
-    now = time.time()
-
-    expired = [stored_token for stored_token, expiry in ACTIVE_TOKENS.items() if expiry < now]
-    for stored_token in expired:
-        del ACTIVE_TOKENS[stored_token]
-
-    if token not in ACTIVE_TOKENS:
+    if not token or not db.validate_manager_token(token):
         return jsonify({"error": "Unauthorized"}), 401
 
     return None
@@ -195,7 +194,9 @@ def authenticate_manager():
     password = data.get("password")
     if password == Config.DASHBOARD_AUTH_PASS:
         token = secrets.token_hex(32)
-        ACTIVE_TOKENS[token] = time.time() + (8 * 3600)
+        expires_at = time.time() + (8 * 3600)
+        db.cleanup_expired_tokens()
+        db.save_manager_token(token, expires_at)
         return jsonify({"success": True, "token": token})
 
     return jsonify({"success": False, "error": "Invalid password"}), 401

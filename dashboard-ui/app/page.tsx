@@ -34,8 +34,6 @@ import { cn } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const REFRESH_MS = 2000;
-const MANAGER_TOKEN_STORAGE_KEY = "mkj_manager_auth";
-const MANAGER_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 type Store = {
   id: number;
@@ -147,11 +145,6 @@ type SalespersonSummary = {
 };
 
 type ApiCall = (url: string, options?: RequestInit) => Promise<Response>;
-
-type StoredManagerToken = {
-  token: string;
-  expires: number;
-};
 
 const emptyStats: Stats = {
   total_events: 0,
@@ -581,6 +574,46 @@ function useIstTime() {
   return time;
 }
 
+// Module-level token store - survives re-renders, no async issues
+const TokenStore = {
+  token: null as string | null,
+
+  load(): string | null {
+    if (typeof window === "undefined") return null;
+    try {
+      const stored = localStorage.getItem("mkj_manager_auth");
+      if (!stored) return null;
+      const { token, expires } = JSON.parse(stored);
+      if (Date.now() > expires) {
+        localStorage.removeItem("mkj_manager_auth");
+        return null;
+      }
+      this.token = token;
+      return token;
+    } catch {
+      localStorage.removeItem("mkj_manager_auth");
+      return null;
+    }
+  },
+
+  save(token: string): void {
+    this.token = token;
+    localStorage.setItem("mkj_manager_auth", JSON.stringify({
+      token,
+      expires: Date.now() + (8 * 60 * 60 * 1000),
+    }));
+  },
+
+  clear(): void {
+    this.token = null;
+    localStorage.removeItem("mkj_manager_auth");
+  },
+
+  getHeader(): Record<string, string> {
+    return this.token ? { "X-Manager-Token": this.token } : {};
+  },
+};
+
 export default function Page() {
   const [managerToken, setManagerToken] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -618,38 +651,28 @@ export default function Page() {
   const renderedEventIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const stored = localStorage.getItem(MANAGER_TOKEN_STORAGE_KEY);
-    if (stored) {
-      try {
-        const { token, expires } = JSON.parse(stored) as StoredManagerToken;
-        if (Date.now() < expires) {
-          setManagerToken(token);
-        } else {
-          localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
-        }
-      } catch {
-        localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
-      }
+    const token = TokenStore.load();
+    if (token) {
+      setManagerToken(token);
     }
     setAuthChecked(true);
   }, []);
 
   const signOut = useCallback(() => {
-    window.localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+    TokenStore.clear();
     setManagerToken(null);
   }, []);
 
   const authFetch = useCallback<ApiCall>(
-    (url, options = {}) => {
-      const headers = new Headers(options.headers);
-      headers.set("X-Manager-Token", managerToken ?? "");
-
-      return fetch(url, {
-        ...options,
-        headers,
-      });
-    },
-    [managerToken],
+    (url, opts = {}) =>
+      fetch(url, {
+        ...opts,
+        headers: {
+          ...TokenStore.getHeader(),
+          ...((opts.headers as Record<string, string>) || {}),
+        },
+      }),
+    [],
   );
 
   const submitLogin = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
@@ -677,11 +700,7 @@ export default function Page() {
         return;
       }
 
-      const stored: StoredManagerToken = {
-        token: payload.token,
-        expires: Date.now() + MANAGER_TOKEN_TTL_MS,
-      };
-      window.localStorage.setItem(MANAGER_TOKEN_STORAGE_KEY, JSON.stringify(stored));
+      TokenStore.save(payload.token);
       setManagerToken(payload.token);
       setLoginPassword("");
     } catch {

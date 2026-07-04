@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
@@ -236,6 +237,15 @@ class Database:
                             END $$;
                             """
                         )
+                        cursor.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS manager_tokens (
+                                token TEXT PRIMARY KEY,
+                                expires_at REAL,
+                                created_at REAL
+                            )
+                            """
+                        )
                     connection.commit()
                 except Exception as exc:
                     connection.rollback()
@@ -379,6 +389,15 @@ class Database:
                     score_reasoning TEXT,
                     customer_satisfaction TEXT,
                     created_at TEXT
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS manager_tokens (
+                    token TEXT PRIMARY KEY,
+                    expires_at REAL,
+                    created_at REAL
                 )
                 """
             )
@@ -687,6 +706,102 @@ class Database:
             return False
 
         return bcrypt.checkpw(pin.encode("utf-8"), pin_hash.encode("utf-8"))
+
+    def save_manager_token(self, token: str, expires_at: float) -> bool:
+        """Persist a manager dashboard token until its expiry timestamp."""
+        created_at = time.time()
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            INSERT INTO manager_tokens (token, expires_at, created_at)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (token)
+                            DO UPDATE SET expires_at = EXCLUDED.expires_at,
+                                          created_at = EXCLUDED.created_at
+                            """,
+                            (token, expires_at, created_at),
+                        )
+                    connection.commit()
+                    return True
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to save manager token.") from exc
+                finally:
+                    self._pool.putconn(connection)
+
+            self._connection.execute(
+                """
+                INSERT OR REPLACE INTO manager_tokens (token, expires_at, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (token, expires_at, created_at),
+            )
+            self._connection.commit()
+
+        return True
+
+    def validate_manager_token(self, token: str) -> bool:
+        """Return True when a manager token exists and has not expired."""
+        if not token:
+            return False
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT expires_at FROM manager_tokens WHERE token = %s",
+                            (token,),
+                        )
+                        row = cursor.fetchone()
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to validate manager token.") from exc
+                finally:
+                    self._pool.putconn(connection)
+            else:
+                row = self._connection.execute(
+                    "SELECT expires_at FROM manager_tokens WHERE token = ?",
+                    (token,),
+                ).fetchone()
+
+        if row is None:
+            return False
+
+        return float(row[0]) > time.time()
+
+    def cleanup_expired_tokens(self) -> None:
+        """Delete expired manager dashboard tokens."""
+        now = time.time()
+
+        with self._lock:
+            if self._backend == "postgres":
+                connection = self._pool.getconn()
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "DELETE FROM manager_tokens WHERE expires_at < %s",
+                            (now,),
+                        )
+                    connection.commit()
+                except Exception as exc:
+                    connection.rollback()
+                    raise DatabaseError("Failed to clean up manager tokens.") from exc
+                finally:
+                    self._pool.putconn(connection)
+                return
+
+            self._connection.execute(
+                "DELETE FROM manager_tokens WHERE expires_at < ?",
+                (now,),
+            )
+            self._connection.commit()
 
     def get_store_name(self, store_id: int | None) -> str | None:
         if store_id is None:

@@ -10,14 +10,12 @@ def dashboard_client(tmp_path, monkeypatch):
     original_db = server.db
     monkeypatch.setattr(server, "db", test_db)
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
-    server.ACTIVE_TOKENS.clear()
 
     try:
         yield server.app.test_client(), test_db
     finally:
         test_db.close()
         monkeypatch.setattr(server, "db", original_db)
-        server.ACTIVE_TOKENS.clear()
 
 
 def _manager_token_header(client) -> dict[str, str]:

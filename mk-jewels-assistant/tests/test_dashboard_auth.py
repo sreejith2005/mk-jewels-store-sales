@@ -6,18 +6,17 @@ from storage.db import Database
 
 @pytest.fixture
 def dashboard_client(tmp_path, monkeypatch):
-    test_db = Database(str(tmp_path / "sessions.db"))
+    db_path = tmp_path / "sessions.db"
+    test_db = Database(str(db_path))
     original_db = server.db
     monkeypatch.setattr(server, "db", test_db)
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
-    server.ACTIVE_TOKENS.clear()
 
     try:
-        yield server.app.test_client(), test_db
+        yield server.app.test_client(), test_db, db_path
     finally:
         test_db.close()
         monkeypatch.setattr(server, "db", original_db)
-        server.ACTIVE_TOKENS.clear()
 
 
 def _seed_salesperson(db: Database) -> int:
@@ -51,7 +50,7 @@ def _manager_token_header(client) -> dict[str, str]:
 
 
 def test_manager_auth_accepts_correct_password(dashboard_client):
-    client, _db = dashboard_client
+    client, db, _db_path = dashboard_client
 
     response = client.post("/api/auth/manager", json={"password": "secret"})
     payload = response.get_json()
@@ -59,11 +58,11 @@ def test_manager_auth_accepts_correct_password(dashboard_client):
     assert response.status_code == 200
     assert payload["success"] is True
     assert isinstance(payload["token"], str)
-    assert payload["token"] in server.ACTIVE_TOKENS
+    assert db.validate_manager_token(payload["token"]) is True
 
 
 def test_manager_auth_rejects_wrong_password(dashboard_client):
-    client, _db = dashboard_client
+    client, _db, _db_path = dashboard_client
 
     response = client.post("/api/auth/manager", json={"password": "wrong"})
 
@@ -72,7 +71,7 @@ def test_manager_auth_rejects_wrong_password(dashboard_client):
 
 
 def test_protected_route_without_token_returns_401(dashboard_client):
-    client, _db = dashboard_client
+    client, _db, _db_path = dashboard_client
 
     response = client.get("/api/sessions")
 
@@ -81,7 +80,7 @@ def test_protected_route_without_token_returns_401(dashboard_client):
 
 
 def test_recorder_store_routes_skip_dashboard_auth(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
     stores_response = client.get("/api/stores")
@@ -93,15 +92,33 @@ def test_recorder_store_routes_skip_dashboard_auth(dashboard_client):
 
 
 def test_protected_route_with_valid_token_returns_200(dashboard_client):
-    client, _db = dashboard_client
+    client, _db, _db_path = dashboard_client
 
     response = client.get("/api/sessions", headers=_manager_token_header(client))
 
     assert response.status_code == 200
 
 
+def test_manager_token_survives_database_reopen(dashboard_client, monkeypatch):
+    client, db, db_path = dashboard_client
+    token_response = client.post("/api/auth/manager", json={"password": "secret"})
+    token = token_response.get_json()["token"]
+    db.close()
+
+    reopened_db = Database(str(db_path))
+    monkeypatch.setattr(server, "db", reopened_db)
+
+    try:
+        response = client.get("/api/sessions", headers={"X-Manager-Token": token})
+
+        assert response.status_code == 200
+        assert reopened_db.validate_manager_token(token) is True
+    finally:
+        reopened_db.close()
+
+
 def test_salesperson_auth_route_skips_dashboard_basic_auth(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
     db.set_salesperson_pin(salesperson_id, "1234")
 
@@ -121,7 +138,7 @@ def test_salesperson_auth_route_skips_dashboard_basic_auth(dashboard_client):
 
 
 def test_salesperson_auth_rejects_invalid_pin(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
     db.set_salesperson_pin(salesperson_id, "1234")
 
@@ -135,7 +152,7 @@ def test_salesperson_auth_rejects_invalid_pin(dashboard_client):
 
 
 def test_salesperson_auth_returns_no_pin_reason(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
     response = client.post(
@@ -148,7 +165,7 @@ def test_salesperson_auth_returns_no_pin_reason(dashboard_client):
 
 
 def test_first_pin_setup_succeeds_when_pin_hash_is_null(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
     response = client.post(
@@ -162,7 +179,7 @@ def test_first_pin_setup_succeeds_when_pin_hash_is_null(dashboard_client):
 
 
 def test_first_pin_setup_rejects_when_pin_already_exists(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
     db.set_salesperson_pin(salesperson_id, "1234")
 
@@ -178,7 +195,7 @@ def test_first_pin_setup_rejects_when_pin_already_exists(dashboard_client):
 
 
 def test_admin_set_pin_requires_manager_token(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
     unauthorized = client.post(
@@ -198,7 +215,7 @@ def test_admin_set_pin_requires_manager_token(dashboard_client):
 
 
 def test_admin_set_pin_rejects_non_four_digit_pin(dashboard_client):
-    client, db = dashboard_client
+    client, db, _db_path = dashboard_client
     salesperson_id = _seed_salesperson(db)
 
     response = client.post(
