@@ -14,6 +14,7 @@ def dashboard_client(tmp_path, monkeypatch):
     server._manager_tokens.clear()
     server._manager_token_set.clear()
     server._manager_failed_attempts.clear()
+    server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
 
     try:
         yield server.app.test_client(), test_db

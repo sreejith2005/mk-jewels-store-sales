@@ -14,12 +14,14 @@ def dashboard_client(tmp_path, monkeypatch):
     server._manager_tokens.clear()
     server._manager_token_set.clear()
     server._manager_failed_attempts.clear()
+    server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
 
     try:
         yield server.app.test_client(), test_db
     finally:
         test_db.close()
         monkeypatch.setattr(server, "db", original_db)
+        server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
 
 
 def _seed_salesperson(db: Database) -> int:
@@ -147,6 +149,17 @@ def test_admin_set_pin_requires_manager_token(dashboard_client):
     assert authorized.status_code == 200
     assert authorized.get_json() == {"success": True}
     assert db.verify_salesperson_pin(salesperson_id, "4321") is True
+
+
+def test_manager_token_survives_empty_memory_set(dashboard_client):
+    client, _db = dashboard_client
+    headers = _manager_token_header(client)
+    server._manager_tokens.clear()
+    server._manager_token_set.clear()
+
+    response = client.get("/api/stores", headers=headers)
+
+    assert response.status_code == 200
 
 
 def test_admin_set_pin_rejects_non_four_digit_pin(dashboard_client):

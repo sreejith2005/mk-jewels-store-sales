@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import os
+import json
 import re
 import secrets
 import sys
@@ -32,6 +33,7 @@ db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
 ENV_PATH = APP_ROOT / ".env"
+MANAGER_TOKEN_PATH = APP_ROOT / ".manager_tokens.json"
 MAX_MANAGER_TOKENS = 10
 MAX_FAILED_MANAGER_LOGINS = 5
 MANAGER_LOGIN_BLOCK_SECONDS = 5 * 60
@@ -229,8 +231,7 @@ def change_manager_password():
     Config.DASHBOARD_AUTH_PASS = new_password
 
     with _manager_auth_lock:
-        _manager_tokens.clear()
-        _manager_token_set.clear()
+        _clear_manager_tokens()
 
     return jsonify({"success": True})
 
@@ -389,18 +390,69 @@ def _extract_manager_token() -> str | None:
 
 def _has_valid_manager_auth() -> bool:
     token = _extract_manager_token()
-    return bool(token and token in _manager_token_set)
+    if not token:
+        return False
+
+    with _manager_auth_lock:
+        _load_manager_tokens()
+        return token in _manager_token_set
 
 
 def _add_manager_token() -> str:
     token = secrets.token_hex(32)
     with _manager_auth_lock:
+        _load_manager_tokens()
         _manager_tokens.append(token)
         _manager_token_set.add(token)
         while len(_manager_tokens) > MAX_MANAGER_TOKENS:
             expired_token = _manager_tokens.pop(0)
             _manager_token_set.discard(expired_token)
+        _save_manager_tokens()
     return token
+
+
+def _load_manager_tokens() -> None:
+    if not MANAGER_TOKEN_PATH.exists():
+        return
+
+    try:
+        data = json.loads(MANAGER_TOKEN_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read manager token store; resetting tokens.")
+        _manager_tokens.clear()
+        _manager_token_set.clear()
+        return
+
+    tokens = data.get("tokens", [])
+    if not isinstance(tokens, list):
+        tokens = []
+
+    _manager_tokens[:] = [
+        token
+        for token in tokens[-MAX_MANAGER_TOKENS:]
+        if isinstance(token, str) and token
+    ]
+    _manager_token_set.clear()
+    _manager_token_set.update(_manager_tokens)
+
+
+def _save_manager_tokens() -> None:
+    try:
+        MANAGER_TOKEN_PATH.write_text(
+            json.dumps({"tokens": _manager_tokens[-MAX_MANAGER_TOKENS:]}),
+            encoding="utf-8",
+        )
+    except OSError as error:
+        logger.warning("Could not write manager token store: %s", error)
+
+
+def _clear_manager_tokens() -> None:
+    _manager_tokens.clear()
+    _manager_token_set.clear()
+    try:
+        MANAGER_TOKEN_PATH.unlink(missing_ok=True)
+    except OSError as error:
+        logger.warning("Could not remove manager token store: %s", error)
 
 
 def _client_ip() -> str:

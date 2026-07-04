@@ -13,3 +13,4 @@ skills/
 *.log
 logs/
 .pytest_cache/
+mk-jewels-assistant/.manager_tokens.json

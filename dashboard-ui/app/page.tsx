@@ -725,7 +725,7 @@ export default function Page() {
     } finally {
       setIsLoadingStores(false);
     }
-  }, []);
+  }, [apiCall]);
 
   const loadSalespersons = useCallback(async (store: Store) => {
     setError(null);
