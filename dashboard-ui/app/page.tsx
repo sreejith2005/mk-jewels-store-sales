@@ -25,7 +25,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2504,9 +2504,6 @@ function ConversationView({
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<ConversationMode>("live");
-  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
-  const renderedTranscriptIdsRef = useRef<Set<string>>(new Set());
-  const scrollSnapshotRef = useRef({ scrollTop: 0, scrollHeight: 0, wasAtBottom: true });
   const fullConversationText = useMemo(
     () =>
       events
@@ -2514,42 +2511,6 @@ function ConversationView({
         .join("\n"),
     [events],
   );
-
-  useEffect(() => {
-    renderedTranscriptIdsRef.current = new Set(events.map(eventStableId));
-  }, [events]);
-
-  useLayoutEffect(() => {
-    const container = transcriptContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    const { scrollTop, scrollHeight, wasAtBottom } = scrollSnapshotRef.current;
-    if (wasAtBottom) {
-      container.scrollTop = container.scrollHeight;
-      return;
-    }
-
-    const heightDelta = container.scrollHeight - scrollHeight;
-    container.scrollTop = scrollTop + heightDelta;
-  }, [events, conversationMode]);
-
-  useLayoutEffect(() => {
-    return () => {
-      const container = transcriptContainerRef.current;
-      if (!container) {
-        return;
-      }
-
-      scrollSnapshotRef.current = {
-        scrollTop: container.scrollTop,
-        scrollHeight: container.scrollHeight,
-        wasAtBottom:
-          container.scrollHeight - container.scrollTop - container.clientHeight <= 100,
-      };
-    };
-  }, [events, conversationMode]);
 
   useEffect(() => {
     if (!deleteMessage) {
@@ -2731,10 +2692,7 @@ function ConversationView({
               </div>
             </div>
 
-            <div
-              ref={transcriptContainerRef}
-              className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]"
-            >
+            <div className="max-h-[62vh] space-y-3 overflow-y-auto p-4 lg:max-h-[calc(100vh-330px)]">
               <SessionScoreCard
                 error={sessionScoreError}
                 isGenerating={isGeneratingSessionScore}
@@ -2749,7 +2707,7 @@ function ConversationView({
                 <EmptyState>No transcript events for this session yet.</EmptyState>
               ) : conversationMode === "full" ? (
                 <div className="space-y-3 rounded-lg border border-white/10 bg-black/25 p-4">
-                  {events.map((event, index) => (
+                  {[...events].reverse().map((event, index) => (
                     <p
                       key={eventStableId(event, index)}
                       className="text-sm leading-7 text-zinc-100"
@@ -2762,7 +2720,7 @@ function ConversationView({
                   ))}
                 </div>
               ) : (
-                events.map((event, index) => (
+                [...events].reverse().map((event, index) => (
                   <TranscriptCard
                     key={eventStableId(event, index)}
                     event={event}
