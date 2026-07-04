@@ -21,19 +21,18 @@ CHECK SERVICES:
   → ollama list
   → curl http://localhost:11434/api/tags
 
-Use these steps from PowerShell. **Make sure you are at the repo root folder**:
-
-```powershell
-cd C:\Users\MIS\Downloads\mkjewels-store-tool
-```
+Use these steps from PowerShell.
 
 ## 1. Start the Backend API
 
-Port `5000` is the default, but this machine may already have another Windows service listening on that port. For demos, use `5001`. Ensure you run this from the repo root folder where the `venv` directory exists:
+Port `5000` is the default, but this machine may already have another Windows service listening on that port. For demos, use `5001`. 
+
+Change directory to the backend folder (`mk-jewels-assistant`) so Python can resolve imports correctly, and run the Flask app using the parent directory's virtual environment:
 
 ```powershell
+cd C:\Users\MIS\Downloads\mkjewels-store-tool\mk-jewels-assistant
 $env:FLASK_APP = "dashboard.server:app"
-.\venv\Scripts\flask.exe run --host 127.0.0.1 --port 5001 --no-debugger --no-reload
+..\venv\Scripts\flask.exe run --host 127.0.0.1 --port 5001 --no-debugger --no-reload
 ```
 
 Leave this terminal open.
