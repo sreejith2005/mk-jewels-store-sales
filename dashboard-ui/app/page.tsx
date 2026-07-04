@@ -650,24 +650,18 @@ export default function Page() {
   }, []);
 
   const apiCall = useCallback<ApiCall>(
-    async (url, options = {}) => {
+    (url, options = {}) => {
       const headers = new Headers(options.headers);
       if (managerToken) {
         headers.set("X-Manager-Token", managerToken);
       }
 
-      const response = await fetch(url, {
+      return fetch(url, {
         ...options,
         headers,
       });
-
-      if (response.status === 401) {
-        signOut();
-      }
-
-      return response;
     },
-    [managerToken, signOut],
+    [managerToken],
   );
 
   const submitLogin = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
