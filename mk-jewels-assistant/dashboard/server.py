@@ -41,7 +41,9 @@ def require_auth() -> Any:
         "/recorder",
         "/static/",
         "/api/auth/manager",
+        "/api/auth/",
         "/api/auth/salesperson",
+        "/api/stores",
         "/api/health",
     ]
     if any(request.path.startswith(path) for path in public_paths):

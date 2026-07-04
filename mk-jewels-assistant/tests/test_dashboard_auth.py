@@ -74,16 +74,28 @@ def test_manager_auth_rejects_wrong_password(dashboard_client):
 def test_protected_route_without_token_returns_401(dashboard_client):
     client, _db = dashboard_client
 
-    response = client.get("/api/stores")
+    response = client.get("/api/sessions")
 
     assert response.status_code == 401
     assert response.get_json() == {"error": "Unauthorized"}
 
 
+def test_recorder_store_routes_skip_dashboard_auth(dashboard_client):
+    client, db = dashboard_client
+    salesperson_id = _seed_salesperson(db)
+
+    stores_response = client.get("/api/stores")
+    salespersons_response = client.get("/api/stores/1/salespersons")
+
+    assert stores_response.status_code == 200
+    assert salespersons_response.status_code == 200
+    assert salespersons_response.get_json()[0]["id"] == salesperson_id
+
+
 def test_protected_route_with_valid_token_returns_200(dashboard_client):
     client, _db = dashboard_client
 
-    response = client.get("/api/stores", headers=_manager_token_header(client))
+    response = client.get("/api/sessions", headers=_manager_token_header(client))
 
     assert response.status_code == 200
 
