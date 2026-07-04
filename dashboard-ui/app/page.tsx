@@ -582,22 +582,8 @@ function useIstTime() {
 }
 
 export default function Page() {
-  const [managerToken, setManagerToken] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const stored = localStorage.getItem(MANAGER_TOKEN_STORAGE_KEY);
-    if (!stored) return null;
-    try {
-      const { token, expires } = JSON.parse(stored) as StoredManagerToken;
-      if (Date.now() > expires) {
-        localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
-        return null;
-      }
-      return token;
-    } catch {
-      localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
-      return null;
-    }
-  });
+  const [managerToken, setManagerToken] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -630,6 +616,23 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [, setLastUpdated] = useState<Date | null>(null);
   const renderedEventIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const stored = localStorage.getItem(MANAGER_TOKEN_STORAGE_KEY);
+    if (stored) {
+      try {
+        const { token, expires } = JSON.parse(stored) as StoredManagerToken;
+        if (Date.now() < expires) {
+          setManagerToken(token);
+        } else {
+          localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+        }
+      } catch {
+        localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
+      }
+    }
+    setAuthChecked(true);
+  }, []);
 
   const signOut = useCallback(() => {
     window.localStorage.removeItem(MANAGER_TOKEN_STORAGE_KEY);
@@ -1128,6 +1131,10 @@ export default function Page() {
   const activeSessions = allSessions.filter(
     (session) => isToday(session.start_time) && isActiveSession(session),
   ).length;
+
+  if (!authChecked) {
+    return <main className="min-h-screen bg-[var(--mk-dark)]" />;
+  }
 
   if (!managerToken) {
     return (
