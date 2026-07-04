@@ -8,7 +8,7 @@ Production environment:
 - Supabase Postgres via session pooler (POSTGRES_URL in .env)
 - Nginx reverse proxy, HTTPS via Cloudflare
 - Flask backend on port 5000, Next.js on port 3000, WebSocket on port 8765
-- 23+ pytest tests must pass after every change
+- 45 pytest tests must pass after every change
 - Next.js build must pass after every frontend change
 
 RULES YOU MUST FOLLOW:
@@ -30,15 +30,15 @@ RULES YOU MUST FOLLOW:
    unless explicitly asked. Any break here stops all recording in production.
 
 6. NEVER change authentication logic for existing routes without explicit instruction.
-   /api/auth/salesperson, /api/admin/set_pin, and basic auth middleware are
-   production-critical.
+   /api/auth/manager, /api/auth/salesperson, /api/auth/salesperson/set-first-pin,
+   /api/admin/set_pin, and the X-Manager-Token request gate are production-critical.
 
 7. ALWAYS run pytest after backend changes:
    cd mk-jewels-assistant && ..\venv\Scripts\python.exe -m pytest tests/ -v
    All tests must pass.
 
-8. ALWAYS run npm run build after frontend changes:
-   cd dashboard-ui && npm run build
+8. ALWAYS run npm.cmd run build after frontend changes:
+   cd dashboard-ui && npm.cmd run build
    Must pass with no errors.
 
 9. ALWAYS list every file changed at the end of your response.
@@ -47,7 +47,7 @@ RULES YOU MUST FOLLOW:
     model download, DB migration), call it out explicitly in a section called
     DEPLOYMENT NOTES so it is not missed when pulling to production.
 
-12. DEPLOYMENT NOTES must include the EXACT pip install command if any new
+11. DEPLOYMENT NOTES must include the EXACT pip install command if any new
     package was added to requirements.txt. Format:
        source venv/bin/activate && pip install -r requirements.txt
     Do not just say 'install new dependencies' — give the exact command.
@@ -55,5 +55,5 @@ RULES YOU MUST FOLLOW:
 Local dev uses SQLite (sessions.db). Production uses Supabase.
 Do not run seed.py without explicit instruction — data is already in Supabase.
 
-Current test count: 29 passing. Do not break existing tests.
+Current test count: 45 passing. Do not break existing tests.
 
