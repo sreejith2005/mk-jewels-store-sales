@@ -80,19 +80,18 @@ def load_models() -> bool:
             )
             response.raise_for_status()
             response_data = response.json()
-            if not str(response_data.get("response", "")).strip():
-                raise RuntimeError("Qwen3 returned an empty warmup response")
+            if response_data.get("done") is not True:
+                raise RuntimeError(
+                    f"Ollama returned unexpected status: {response.status_code}"
+                )
             qwen_ready = True
-            logger.info(
-                "Qwen3 warmup completed in %.2fs",
-                time.perf_counter() - qwen_start,
-            )
+            logger.info("Qwen3 warmup OK in %.2fs", time.perf_counter() - qwen_start)
             break
         except (requests.RequestException, RuntimeError, ValueError) as error:
-            logger.error("Qwen3 warmup attempt %d failed: %s", attempt, error)
+            logger.warning("Qwen3 warmup attempt %d failed: %s", attempt, error)
             if attempt == 1:
-                logger.info("Retrying Qwen3 warmup in 30 seconds")
-                time.sleep(30)
+                logger.info("Retrying Qwen3 warmup in 5 seconds")
+                time.sleep(5)
 
     if not qwen_ready:
         return False

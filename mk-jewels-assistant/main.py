@@ -86,8 +86,8 @@ def main(argv: list[str] | None = None):
         logger.info("Loading models - server will not accept connections until ready")
         success = load_models()
         if not success:
-            logger.error("Model loading failed - exiting")
-            sys.exit(1)
+            logger.warning("Model warmup check failed - proceeding anyway")
+            logger.warning("Triage may fail on first few requests until Qwen3 warms up")
         set_ready()
         wait_until_ready(timeout=0)
         logger.info("All models loaded - starting servers")
