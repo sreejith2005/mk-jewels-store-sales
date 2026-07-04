@@ -29,7 +29,6 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
     PIPELINE_MODE = _get_pipeline_mode()
-    DASHBOARD_AUTH_USER = os.getenv("DASHBOARD_AUTH_USER", "admin")
     DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "5500")
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))

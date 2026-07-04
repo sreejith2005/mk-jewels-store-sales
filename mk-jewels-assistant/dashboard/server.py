@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import os
-import json
 import re
 import secrets
 import sys
@@ -12,7 +11,6 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
-from dotenv import set_key
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
@@ -32,41 +30,34 @@ CORS(app, origins=Config.CORS_ORIGINS.split(","))
 db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
-ENV_PATH = APP_ROOT / ".env"
-MANAGER_TOKEN_PATH = APP_ROOT / ".manager_tokens.json"
-MAX_MANAGER_TOKENS = 10
-MAX_FAILED_MANAGER_LOGINS = 5
-MANAGER_LOGIN_BLOCK_SECONDS = 5 * 60
-_manager_tokens: list[str] = []
-_manager_token_set: set[str] = set()
-_manager_auth_lock = threading.Lock()
-_manager_failed_attempts: dict[str, dict[str, float | int]] = {}
+ACTIVE_TOKENS: dict[str, float] = {}
 
 
 @app.before_request
-def require_manager_token() -> Any:
+def require_auth() -> Any:
     if request.method == "OPTIONS":
         return None
-    if request.method == "GET" and request.path == "/api/health":
-        return None
-    if request.method == "GET" and request.path == "/recorder":
-        return None
-    if request.method == "GET" and request.path.startswith("/static/"):
-        return None
-    if request.method == "POST" and request.path in {
-        "/api/auth/salesperson",
-        "/api/auth/salesperson/set-first-pin",
+    public_paths = [
+        "/recorder",
+        "/static/",
         "/api/auth/manager",
-    }:
+        "/api/auth/salesperson",
+        "/api/health",
+    ]
+    if any(request.path.startswith(path) for path in public_paths):
         return None
 
-    if not Config.DASHBOARD_AUTH_PASS:
-        return None
+    token = request.headers.get("X-Manager-Token", "")
+    now = time.time()
 
-    if _has_valid_manager_auth():
-        return None
+    expired = [stored_token for stored_token, expiry in ACTIVE_TOKENS.items() if expiry < now]
+    for stored_token in expired:
+        del ACTIVE_TOKENS[stored_token]
 
-    return jsonify({"error": "Unauthorized"}), 401
+    if token not in ACTIVE_TOKENS:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    return None
 
 
 @app.get("/recorder")
@@ -184,56 +175,14 @@ def set_first_salesperson_pin():
 
 @app.post("/api/auth/manager")
 def authenticate_manager():
-    client_ip = _client_ip()
-    blocked_for = _manager_login_block_remaining(client_ip)
-    if blocked_for > 0:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "Too many attempts, try again in 5 minutes",
-                }
-            ),
-            429,
-        )
-
     data = request.get_json(silent=True) or {}
     password = data.get("password")
-    if not isinstance(password, str) or not secrets.compare_digest(
-        password,
-        Config.DASHBOARD_AUTH_PASS,
-    ):
-        _record_failed_manager_login(client_ip)
-        return jsonify({"success": False, "error": "Invalid password"}), 401
+    if password == Config.DASHBOARD_AUTH_PASS:
+        token = secrets.token_hex(32)
+        ACTIVE_TOKENS[token] = time.time() + (8 * 3600)
+        return jsonify({"success": True, "token": token})
 
-    _clear_failed_manager_login(client_ip)
-    token = _add_manager_token()
-    return jsonify({"success": True, "token": token})
-
-
-@app.post("/api/auth/manager/change-password")
-def change_manager_password():
-    data = request.get_json(silent=True) or {}
-    current_password = data.get("current_password")
-    new_password = data.get("new_password")
-
-    if not isinstance(current_password, str) or not secrets.compare_digest(
-        current_password,
-        Config.DASHBOARD_AUTH_PASS,
-    ):
-        return jsonify({"success": False, "error": "Invalid password"}), 401
-
-    if not isinstance(new_password, str) or not new_password.strip():
-        return jsonify({"success": False, "error": "New password is required"}), 400
-
-    ENV_PATH.touch(exist_ok=True)
-    set_key(str(ENV_PATH), "DASHBOARD_AUTH_PASS", new_password)
-    Config.DASHBOARD_AUTH_PASS = new_password
-
-    with _manager_auth_lock:
-        _clear_manager_tokens()
-
-    return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Invalid password"}), 401
 
 
 @app.post("/api/admin/set_pin")
@@ -377,122 +326,6 @@ def queue_session_score_generation(session_id: str) -> None:
             logger.warning("Background score generation failed for %s: %s", session_id, error)
 
     threading.Thread(target=worker, daemon=True).start()
-
-
-def _extract_manager_token() -> str | None:
-    authorization = request.headers.get("Authorization", "")
-    if authorization.lower().startswith("bearer "):
-        return authorization[7:].strip()
-
-    header_token = request.headers.get("X-Manager-Token", "")
-    return header_token.strip() or None
-
-
-def _has_valid_manager_auth() -> bool:
-    token = _extract_manager_token()
-    if not token:
-        return False
-
-    with _manager_auth_lock:
-        _load_manager_tokens()
-        return token in _manager_token_set
-
-
-def _add_manager_token() -> str:
-    token = secrets.token_hex(32)
-    with _manager_auth_lock:
-        _load_manager_tokens()
-        _manager_tokens.append(token)
-        _manager_token_set.add(token)
-        while len(_manager_tokens) > MAX_MANAGER_TOKENS:
-            expired_token = _manager_tokens.pop(0)
-            _manager_token_set.discard(expired_token)
-        _save_manager_tokens()
-    return token
-
-
-def _load_manager_tokens() -> None:
-    if not MANAGER_TOKEN_PATH.exists():
-        return
-
-    try:
-        data = json.loads(MANAGER_TOKEN_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.warning("Could not read manager token store; resetting tokens.")
-        _manager_tokens.clear()
-        _manager_token_set.clear()
-        return
-
-    tokens = data.get("tokens", [])
-    if not isinstance(tokens, list):
-        tokens = []
-
-    _manager_tokens[:] = [
-        token
-        for token in tokens[-MAX_MANAGER_TOKENS:]
-        if isinstance(token, str) and token
-    ]
-    _manager_token_set.clear()
-    _manager_token_set.update(_manager_tokens)
-
-
-def _save_manager_tokens() -> None:
-    try:
-        MANAGER_TOKEN_PATH.write_text(
-            json.dumps({"tokens": _manager_tokens[-MAX_MANAGER_TOKENS:]}),
-            encoding="utf-8",
-        )
-    except OSError as error:
-        logger.warning("Could not write manager token store: %s", error)
-
-
-def _clear_manager_tokens() -> None:
-    _manager_tokens.clear()
-    _manager_token_set.clear()
-    try:
-        MANAGER_TOKEN_PATH.unlink(missing_ok=True)
-    except OSError as error:
-        logger.warning("Could not remove manager token store: %s", error)
-
-
-def _client_ip() -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
-    return request.remote_addr or "unknown"
-
-
-def _manager_login_block_remaining(client_ip: str) -> float:
-    with _manager_auth_lock:
-        attempt = _manager_failed_attempts.get(client_ip)
-        if not attempt:
-            return 0
-
-        blocked_until = float(attempt.get("blocked_until", 0))
-        remaining = blocked_until - time.time()
-        if remaining <= 0 and blocked_until:
-            _manager_failed_attempts.pop(client_ip, None)
-            return 0
-
-        return max(0, remaining)
-
-
-def _record_failed_manager_login(client_ip: str) -> None:
-    now = time.time()
-    with _manager_auth_lock:
-        attempt = _manager_failed_attempts.get(client_ip, {"count": 0, "blocked_until": 0})
-        count = int(attempt.get("count", 0)) + 1
-        _manager_failed_attempts[client_ip] = {
-            "count": count,
-            "blocked_until": now + MANAGER_LOGIN_BLOCK_SECONDS
-            if count >= MAX_FAILED_MANAGER_LOGINS
-            else 0,
-        }
-
-
-def _clear_failed_manager_login(client_ip: str) -> None:
-    with _manager_auth_lock:
-        _manager_failed_attempts.pop(client_ip, None)
 
 
 def _clean_text(value: Any, default: str, max_length: int) -> str:

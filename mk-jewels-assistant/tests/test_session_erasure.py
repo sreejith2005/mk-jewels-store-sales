@@ -9,18 +9,15 @@ def dashboard_client(tmp_path, monkeypatch):
     test_db = Database(str(tmp_path / "sessions.db"))
     original_db = server.db
     monkeypatch.setattr(server, "db", test_db)
-    monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_USER", "admin")
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
-    server._manager_tokens.clear()
-    server._manager_token_set.clear()
-    server._manager_failed_attempts.clear()
-    server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
+    server.ACTIVE_TOKENS.clear()
 
     try:
         yield server.app.test_client(), test_db
     finally:
         test_db.close()
         monkeypatch.setattr(server, "db", original_db)
+        server.ACTIVE_TOKENS.clear()
 
 
 def _manager_token_header(client) -> dict[str, str]:

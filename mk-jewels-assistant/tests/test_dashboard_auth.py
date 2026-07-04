@@ -9,19 +9,15 @@ def dashboard_client(tmp_path, monkeypatch):
     test_db = Database(str(tmp_path / "sessions.db"))
     original_db = server.db
     monkeypatch.setattr(server, "db", test_db)
-    monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_USER", "admin")
     monkeypatch.setattr(server.Config, "DASHBOARD_AUTH_PASS", "secret")
-    server._manager_tokens.clear()
-    server._manager_token_set.clear()
-    server._manager_failed_attempts.clear()
-    server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
+    server.ACTIVE_TOKENS.clear()
 
     try:
         yield server.app.test_client(), test_db
     finally:
         test_db.close()
         monkeypatch.setattr(server, "db", original_db)
-        server.MANAGER_TOKEN_PATH.unlink(missing_ok=True)
+        server.ACTIVE_TOKENS.clear()
 
 
 def _seed_salesperson(db: Database) -> int:
@@ -52,6 +48,44 @@ def _manager_token_header(client) -> dict[str, str]:
     response = client.post("/api/auth/manager", json={"password": "secret"})
     token = response.get_json()["token"]
     return {"X-Manager-Token": token}
+
+
+def test_manager_auth_accepts_correct_password(dashboard_client):
+    client, _db = dashboard_client
+
+    response = client.post("/api/auth/manager", json={"password": "secret"})
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert isinstance(payload["token"], str)
+    assert payload["token"] in server.ACTIVE_TOKENS
+
+
+def test_manager_auth_rejects_wrong_password(dashboard_client):
+    client, _db = dashboard_client
+
+    response = client.post("/api/auth/manager", json={"password": "wrong"})
+
+    assert response.status_code == 401
+    assert response.get_json() == {"success": False, "error": "Invalid password"}
+
+
+def test_protected_route_without_token_returns_401(dashboard_client):
+    client, _db = dashboard_client
+
+    response = client.get("/api/stores")
+
+    assert response.status_code == 401
+    assert response.get_json() == {"error": "Unauthorized"}
+
+
+def test_protected_route_with_valid_token_returns_200(dashboard_client):
+    client, _db = dashboard_client
+
+    response = client.get("/api/stores", headers=_manager_token_header(client))
+
+    assert response.status_code == 200
 
 
 def test_salesperson_auth_route_skips_dashboard_basic_auth(dashboard_client):
@@ -149,17 +183,6 @@ def test_admin_set_pin_requires_manager_token(dashboard_client):
     assert authorized.status_code == 200
     assert authorized.get_json() == {"success": True}
     assert db.verify_salesperson_pin(salesperson_id, "4321") is True
-
-
-def test_manager_token_survives_empty_memory_set(dashboard_client):
-    client, _db = dashboard_client
-    headers = _manager_token_header(client)
-    server._manager_tokens.clear()
-    server._manager_token_set.clear()
-
-    response = client.get("/api/stores", headers=headers)
-
-    assert response.status_code == 200
 
 
 def test_admin_set_pin_rejects_non_four_digit_pin(dashboard_client):
