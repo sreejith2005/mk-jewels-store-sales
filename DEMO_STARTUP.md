@@ -1,6 +1,6 @@
 # MK Jewels Demo Startup
 
-# These is the quick reference step for demo -> Production
+# These is the quick reference step for DEMO -> PRODUCTION
 MAKE CHANGE:
   → Codex locally → pytest passes → npm build passes → git push
 
@@ -21,7 +21,7 @@ CHECK SERVICES:
   → ollama list
   → curl http://localhost:11434/api/tags
 
-Use these steps from PowerShell at the repo root:
+Use these steps from PowerShell. **Make sure you are at the repo root folder**:
 
 ```powershell
 cd C:\Users\MIS\Downloads\mkjewels-store-tool
@@ -29,7 +29,7 @@ cd C:\Users\MIS\Downloads\mkjewels-store-tool
 
 ## 1. Start the Backend API
 
-Port `5000` is the default, but this machine may already have another Windows service listening on that port. For demos, use `5001`.
+Port `5000` is the default, but this machine may already have another Windows service listening on that port. For demos, use `5001`. Ensure you run this from the repo root folder where the `venv` directory exists:
 
 ```powershell
 $env:FLASK_APP = "dashboard.server:app"
@@ -54,12 +54,15 @@ The numbers may differ depending on the current database.
 
 ## 2. Start the Dashboard UI
 
-Open a second PowerShell window:
+Open a second PowerShell window. 
+
+> [!NOTE]
+> If your PowerShell displays an execution policy error like `npm.ps1 cannot be loaded because running scripts is disabled on this system`, use **`npm.cmd`** instead of `npm`.
 
 ```powershell
 cd C:\Users\MIS\Downloads\mkjewels-store-tool\dashboard-ui
 $env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:5001"
-npm run dev
+npm.cmd run dev
 ```
 
 Leave this terminal open.
