@@ -872,7 +872,7 @@ export default function Page() {
   }, [authFetch, selectedSession]);
 
   useEffect(() => {
-    if (!managerToken) {
+    if (!authChecked || !managerToken) {
       return;
     }
 
@@ -881,19 +881,19 @@ export default function Page() {
     return () => {
       window.clearTimeout(initialRefresh);
     };
-  }, [loadStores, managerToken]);
+  }, [authChecked, loadStores, managerToken]);
 
   useEffect(() => {
-    if (!managerToken) {
+    if (!authChecked || !managerToken) {
       return;
     }
 
     const timeout = window.setTimeout(() => void loadSelectedSessionScore(), 0);
     return () => window.clearTimeout(timeout);
-  }, [loadSelectedSessionScore, managerToken]);
+  }, [authChecked, loadSelectedSessionScore, managerToken]);
 
   useEffect(() => {
-    if (!managerToken || !selectedStore || selectedSalesperson) {
+    if (!authChecked || !managerToken || !selectedStore || selectedSalesperson) {
       return;
     }
 
@@ -905,19 +905,19 @@ export default function Page() {
     return () => {
       window.clearTimeout(initialRefresh);
     };
-  }, [loadSalespersons, managerToken, selectedSalesperson, selectedStore]);
+  }, [authChecked, loadSalespersons, managerToken, selectedSalesperson, selectedStore]);
 
   useEffect(() => {
-    if (!managerToken || !selectedStore || salespersons.length === 0) {
+    if (!authChecked || !managerToken || !selectedStore || salespersons.length === 0) {
       return;
     }
 
     const interval = window.setInterval(() => void refreshStoreSessions(selectedStore), REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [managerToken, refreshStoreSessions, salespersons.length, selectedStore]);
+  }, [authChecked, managerToken, refreshStoreSessions, salespersons.length, selectedStore]);
 
   useEffect(() => {
-    if (!managerToken || !selectedStore || !selectedSalesperson) {
+    if (!authChecked || !managerToken || !selectedStore || !selectedSalesperson) {
       return;
     }
 
@@ -928,7 +928,7 @@ export default function Page() {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [loadConversation, managerToken, selectedSalesperson, selectedStore]);
+  }, [authChecked, loadConversation, managerToken, selectedSalesperson, selectedStore]);
 
   const storeActiveCounts = useMemo(() => {
     const counts = new Map<number, number>();
@@ -1215,13 +1215,32 @@ export default function Page() {
             ) : null}
 
             {view === "pin-management" ? (
-              <PinManagementView apiCall={authFetch} stores={stores} />
+              <PinManagementView
+                apiCall={authFetch}
+                authChecked={authChecked}
+                managerToken={managerToken}
+                stores={stores}
+              />
             ) : view === "reports" ? (
-              <ReportsView apiCall={authFetch} stores={stores} />
+              <ReportsView
+                apiCall={authFetch}
+                authChecked={authChecked}
+                managerToken={managerToken}
+                stores={stores}
+              />
             ) : view === "alerts" ? (
-              <AlertsView apiCall={authFetch} />
+              <AlertsView
+                apiCall={authFetch}
+                authChecked={authChecked}
+                managerToken={managerToken}
+              />
             ) : view === "scores" ? (
-              <ScoresView apiCall={authFetch} stores={stores} />
+              <ScoresView
+                apiCall={authFetch}
+                authChecked={authChecked}
+                managerToken={managerToken}
+                stores={stores}
+              />
             ) : !selectedStore ? (
               <StoreSelection
                 activeCounts={storeActiveCounts}
@@ -1608,7 +1627,15 @@ function SalespersonSelection({
   );
 }
 
-function AlertsView({ apiCall }: { apiCall: ApiCall }) {
+function AlertsView({
+  apiCall,
+  authChecked,
+  managerToken,
+}: {
+  apiCall: ApiCall;
+  authChecked: boolean;
+  managerToken: string | null;
+}) {
   const [alerts, setAlerts] = useState<AlertLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1627,13 +1654,17 @@ function AlertsView({ apiCall }: { apiCall: ApiCall }) {
   }, [apiCall]);
 
   useEffect(() => {
+    if (!authChecked || !managerToken) {
+      return;
+    }
+
     const initialRefresh = window.setTimeout(() => void loadAlerts(), 0);
     const interval = window.setInterval(() => void loadAlerts(), REFRESH_MS);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [loadAlerts]);
+  }, [authChecked, loadAlerts, managerToken]);
 
   return (
     <section className="flex flex-col gap-5">
@@ -1706,7 +1737,17 @@ function AlertsView({ apiCall }: { apiCall: ApiCall }) {
   );
 }
 
-function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
+function ReportsView({
+  apiCall,
+  authChecked,
+  managerToken,
+  stores,
+}: {
+  apiCall: ApiCall;
+  authChecked: boolean;
+  managerToken: string | null;
+  stores: Store[];
+}) {
   const [allSalespersons, setAllSalespersons] = useState<Salesperson[]>([]);
   const [selectedName, setSelectedName] = useState("");
   const [reports, setReports] = useState<CoachingReport[]>([]);
@@ -1715,6 +1756,10 @@ function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] })
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!authChecked || !managerToken) {
+      return;
+    }
+
     if (stores.length === 0) {
       setAllSalespersons([]);
       return;
@@ -1744,9 +1789,13 @@ function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] })
     return () => {
       cancelled = true;
     };
-  }, [apiCall, stores]);
+  }, [apiCall, authChecked, managerToken, stores]);
 
   useEffect(() => {
+    if (!authChecked || !managerToken) {
+      return;
+    }
+
     if (!selectedName) {
       setReports([]);
       return;
@@ -1780,7 +1829,7 @@ function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] })
     return () => {
       cancelled = true;
     };
-  }, [apiCall, selectedName]);
+  }, [apiCall, authChecked, managerToken, selectedName]);
 
   return (
     <section className="flex flex-col gap-5">
@@ -1850,7 +1899,17 @@ function ReportsView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] })
   );
 }
 
-function ScoresView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
+function ScoresView({
+  apiCall,
+  authChecked,
+  managerToken,
+  stores,
+}: {
+  apiCall: ApiCall;
+  authChecked: boolean;
+  managerToken: string | null;
+  stores: Store[];
+}) {
   const [selectedStoreId, setSelectedStoreId] = useState<number | "">(
     stores[0]?.id ?? "",
   );
@@ -1862,6 +1921,10 @@ function ScoresView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) 
   const effectiveStoreId = selectedStoreId || stores[0]?.id || "";
 
   useEffect(() => {
+    if (!authChecked || !managerToken) {
+      return;
+    }
+
     if (!effectiveStoreId) {
       return;
     }
@@ -1889,7 +1952,7 @@ function ScoresView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) 
     return () => {
       cancelled = true;
     };
-  }, [apiCall, effectiveStoreId]);
+  }, [apiCall, authChecked, effectiveStoreId, managerToken]);
 
   const toggleSalesperson = async (name: string) => {
     if (expandedName === name) {
@@ -2085,7 +2148,17 @@ function TrendBadge({ trend }: { trend: number }) {
   );
 }
 
-function PinManagementView({ apiCall, stores }: { apiCall: ApiCall; stores: Store[] }) {
+function PinManagementView({
+  apiCall,
+  authChecked,
+  managerToken,
+  stores,
+}: {
+  apiCall: ApiCall;
+  authChecked: boolean;
+  managerToken: string | null;
+  stores: Store[];
+}) {
   const [selectedStoreId, setSelectedStoreId] = useState<string>("all");
   const [pinSalespersons, setPinSalespersons] = useState<Salesperson[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -2119,6 +2192,10 @@ function PinManagementView({ apiCall, stores }: { apiCall: ApiCall; stores: Stor
   }, [apiCall, selectedStoreId, stores]);
 
   useEffect(() => {
+    if (!authChecked || !managerToken) {
+      return;
+    }
+
     if (stores.length === 0) {
       setPinSalespersons([]);
       return;
@@ -2126,7 +2203,7 @@ function PinManagementView({ apiCall, stores }: { apiCall: ApiCall; stores: Stor
 
     const initialRefresh = window.setTimeout(() => void loadPinSalespersons(), 0);
     return () => window.clearTimeout(initialRefresh);
-  }, [loadPinSalespersons, stores.length]);
+  }, [authChecked, loadPinSalespersons, managerToken, stores.length]);
 
   const savePin = async (salespersonId: number, pin: string) => {
     await setSalespersonPin(apiCall, salespersonId, pin);

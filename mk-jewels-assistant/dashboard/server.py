@@ -45,6 +45,7 @@ def require_auth() -> Any:
         "/api/auth/salesperson",
         "/api/stores",
         "/api/health",
+        "/favicon.ico",
     ]
     if any(request.path.startswith(path) for path in public_paths):
         return None
