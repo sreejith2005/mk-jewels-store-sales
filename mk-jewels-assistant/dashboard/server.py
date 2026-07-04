@@ -27,7 +27,7 @@ from storage.db import Database  # noqa: E402
 
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-CORS(app, origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","))
+CORS(app, origins=Config.CORS_ORIGINS.split(","))
 db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
@@ -43,6 +43,8 @@ _manager_failed_attempts: dict[str, dict[str, float | int]] = {}
 
 @app.before_request
 def require_manager_token() -> Any:
+    if request.method == "OPTIONS":
+        return None
     if request.method == "GET" and request.path == "/api/health":
         return None
     if request.method == "GET" and request.path == "/recorder":
