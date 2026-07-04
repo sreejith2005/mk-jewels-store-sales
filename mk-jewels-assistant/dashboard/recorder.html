@@ -508,6 +508,12 @@
       animation: recordPulse 1.8s ease-in-out infinite;
     }
 
+    #startButton.readiness-disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     .record-icon,
     .stop-icon {
       display: block;
@@ -583,34 +589,13 @@
       text-align: center;
     }
 
-    .readiness-banner {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      min-height: 44px;
-      padding: 10px 14px;
-      border: 1px solid var(--border-gold);
-      border-radius: 12px;
-      background: rgba(201, 169, 110, 0.12);
+    .readiness-message {
+      min-height: 20px;
+      margin: -10px 0 0;
       color: var(--gold-dark);
       font-size: 13px;
       font-weight: 700;
-    }
-
-    .readiness-spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(160, 120, 64, 0.24);
-      border-top-color: var(--gold-dark);
-      border-radius: 999px;
-      animation: readinessSpin 900ms linear infinite;
-    }
-
-    @keyframes readinessSpin {
-      to {
-        transform: rotate(360deg);
-      }
+      text-align: center;
     }
 
     @keyframes recordPulse {
@@ -790,10 +775,7 @@
           </button>
         </div>
 
-        <div id="readinessBanner" class="readiness-banner hidden" role="status" aria-live="polite">
-          <span class="readiness-spinner" aria-hidden="true"></span>
-          <span>System is warming up, please wait...</span>
-        </div>
+        <p id="readinessMessage" class="readiness-message hidden" role="status" aria-live="polite"></p>
 
         <div class="status-grid" aria-live="polite">
           <div class="status-row">
@@ -851,7 +833,7 @@
     const recordingStatus = document.getElementById("recordingStatus");
     const wakeLockStatus = document.getElementById("wakeLockStatus");
     const message = document.getElementById("message");
-    const readinessBanner = document.getElementById("readinessBanner");
+    const readinessMessage = document.getElementById("readinessMessage");
 
     let wakeLock = null;
     let selectedStore = null;
@@ -1389,12 +1371,15 @@
       startButton.classList.toggle("recording-active", isRecording);
       recordButtonIcon.className = isRecording ? "stop-icon" : "record-icon";
       recordButtonLabel.textContent = isRecording ? "Stop Recording" : "Start Recording";
-      startButton.disabled = !isRecording && !isSystemReady;
+      const readinessBlocked = !isRecording && !isSystemReady;
+      startButton.disabled = readinessBlocked;
+      startButton.classList.toggle("readiness-disabled", readinessBlocked);
     }
 
-    function setReadinessState(ready) {
+    function setReadinessState(ready, statusText = "") {
       isSystemReady = ready;
-      readinessBanner.classList.toggle("hidden", ready);
+      readinessMessage.textContent = ready ? "" : statusText;
+      readinessMessage.classList.toggle("hidden", ready || !statusText);
       updateRecordButtonState();
     }
 
@@ -1410,11 +1395,12 @@
           setReadinessState(true);
           return;
         }
+        setReadinessState(false, "Starting up... please wait");
       } catch (error) {
         console.log("Readiness check failed:", error);
+        setReadinessState(false, "Connecting to server...");
       }
 
-      setReadinessState(false);
       readinessPollTimer = window.setTimeout(checkReadiness, 5000);
     }
 

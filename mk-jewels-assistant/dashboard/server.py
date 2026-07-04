@@ -31,6 +31,7 @@ db = Database()
 logger = get_logger(__name__)
 PIN_PATTERN = re.compile(r"^\d{4}$")
 ACTIVE_TOKENS: dict[str, float] = {}
+STARTED_AT = time.time()
 
 
 @app.before_request
@@ -74,6 +75,18 @@ def get_health():
     return jsonify(
         {
             "status": "ready" if ready else "loading",
+            "pipeline": Config.PIPELINE_MODE,
+        }
+    )
+
+
+@app.get("/api/health/detail")
+def get_health_detail():
+    ready = Config.PIPELINE_MODE == "demo" or is_ready()
+    return jsonify(
+        {
+            "status": "ready" if ready else "loading",
+            "uptime_seconds": int(time.time() - STARTED_AT),
             "pipeline": Config.PIPELINE_MODE,
         }
     )

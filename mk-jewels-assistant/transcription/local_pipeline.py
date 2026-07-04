@@ -60,25 +60,45 @@ def load_models() -> bool:
         logger.error("IndicConformer warmup failed: %s", error)
         return False
 
-    try:
-        qwen_start = time.perf_counter()
-        response = requests.post(
-            f"{Config.OLLAMA_HOST.rstrip('/')}/api/generate",
-            json={
-                "model": qwen3_triage.MODEL_NAME,
-                "prompt": "hello",
-                "stream": False,
-            },
-            timeout=120,
-        )
-        response.raise_for_status()
-        logger.info("Qwen3 warmup completed in %.2fs", time.perf_counter() - qwen_start)
-    except requests.RequestException as error:
-        logger.error("Qwen3 warmup failed: %s", error)
+    qwen_ready = False
+    qwen_payload = {
+        "model": qwen3_triage.MODEL_NAME,
+        "prompt": "reply ok",
+        "stream": False,
+        "options": {
+            "num_predict": 3,
+            "temperature": 0,
+        },
+    }
+    for attempt in range(1, 3):
+        try:
+            qwen_start = time.perf_counter()
+            response = requests.post(
+                f"{Config.OLLAMA_HOST.rstrip('/')}/api/generate",
+                json=qwen_payload,
+                timeout=300,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            if not str(response_data.get("response", "")).strip():
+                raise RuntimeError("Qwen3 returned an empty warmup response")
+            qwen_ready = True
+            logger.info(
+                "Qwen3 warmup completed in %.2fs",
+                time.perf_counter() - qwen_start,
+            )
+            break
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            logger.error("Qwen3 warmup attempt %d failed: %s", attempt, error)
+            if attempt == 1:
+                logger.info("Retrying Qwen3 warmup in 30 seconds")
+                time.sleep(30)
+
+    if not qwen_ready:
         return False
 
     _MODELS_WARMED_UP = True
-    logger.info("Production model warmup finished in %.2fs", time.perf_counter() - warmup_start)
+    logger.info("Models ready in %.2f seconds", time.perf_counter() - warmup_start)
     return True
 
 
