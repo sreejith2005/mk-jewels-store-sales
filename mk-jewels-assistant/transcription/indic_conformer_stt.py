@@ -17,87 +17,25 @@ logger = get_logger(__name__)
 
 MODEL_ID = "ai4bharat/indic-conformer-600m-multilingual"
 TARGET_SAMPLE_RATE = 16000
-DEFAULT_DECODING = "ctc"
-
-_model = None
-_model_debug_logged = False
 
 
-def _language_preferences() -> list[str]:
-    preferred = (Config.TRANSCRIPT_LANGUAGE or Config.INDIC_CONFORMER_LANGUAGE).lower()
-    if preferred == "en":
-        return ["en", "auto", "hi"]
-    if preferred == "hi":
-        return ["hi", "auto", "en"]
-    return ["auto", "en", "hi"]
-
-
-def _load_model() -> object:
-    """Load and cache the custom IndicConformer model."""
-    global _model, _model_debug_logged
-    if _model is not None:
-        return _model
-
+def _load_model() -> tuple[object, object]:
+    """Load the IndicConformer processor and CTC model."""
     try:
         import torch
-        from transformers import AutoModel
+        from transformers import AutoModelForCTC, AutoProcessor
 
-        if Config.DEVICE == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but unavailable; falling back to CPU")
-            device = "cpu"
-        else:
-            device = Config.DEVICE
-
-        token = Config.HUGGINGFACE_TOKEN.strip() or None
-        model_kwargs = {"trust_remote_code": True}
-        if token:
-            model_kwargs["token"] = token
-
-        model = AutoModel.from_pretrained(MODEL_ID, **model_kwargs)
+        processor = AutoProcessor.from_pretrained(MODEL_ID)
+        model = AutoModelForCTC.from_pretrained(MODEL_ID)
+        model.to(Config.DEVICE)
         model.eval()
-        _model = model
-        logger.info("IndicConformer model loaded on %s", device)
-        if not _model_debug_logged:
-            logger.debug("IndicConformer model type: %s", type(model))
-            logger.debug("IndicConformer model dir: %s", dir(model))
-            _model_debug_logged = True
-        return _model
+        logger.info("IndicConformer model loaded on %s", Config.DEVICE)
+        return processor, model
     except Exception as exc:
         raise STTError(f"Failed to load IndicConformer model: {exc}") from exc
 
 
-def _infer_transcript(stt_model: object, waveform: object) -> str:
-    """Call IndicConformer with explicit language preference and safe fallbacks."""
-    last_error = None
-    for language in _language_preferences():
-        try:
-            logger.info("IndicConformer transcription language preference: %s", language)
-            if hasattr(stt_model, "transcribe"):
-                try:
-                    return stt_model.transcribe(
-                        waveform,
-                        language=language,
-                        decoding=DEFAULT_DECODING,
-                    )
-                except TypeError:
-                    return stt_model.transcribe(waveform, language, DEFAULT_DECODING)
-            return stt_model(waveform, language, DEFAULT_DECODING)
-        except TypeError as exc:
-            last_error = exc
-            logger.warning(
-                "IndicConformer rejected language=%s; trying next preference: %s",
-                language,
-                exc,
-            )
-        except Exception as exc:
-            last_error = exc
-            logger.warning(
-                "IndicConformer transcription failed with language=%s; trying next preference: %s",
-                language,
-                exc,
-            )
-
-    raise STTError(f"IndicConformer transcription failed for all languages: {last_error}")
+processor, model = _load_model()
 
 
 def _pcm_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
@@ -119,7 +57,7 @@ def _resample_if_needed(audio: np.ndarray, sample_rate: int) -> np.ndarray:
 
 def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
     """
-    Transcribe raw int16 PCM mono audio bytes using IndicConformer.
+    Transcribe raw int16 PCM mono audio bytes using IndicConformer CTC decoding.
     """
     if not audio_bytes:
         return ""
@@ -135,15 +73,19 @@ def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
         if audio.size == 0 or not np.any(audio):
             return ""
 
-        waveform = torch.from_numpy(audio).float().unsqueeze(0)
-        stt_model = _load_model()
+        inputs = processor(
+            audio,
+            sampling_rate=TARGET_SAMPLE_RATE,
+            return_tensors="pt",
+        )
+        input_values = inputs.input_values.to(Config.DEVICE)
 
         with torch.no_grad():
-            transcript = _infer_transcript(stt_model, waveform)
+            logits = model(input_values).logits
 
-        if isinstance(transcript, (list, tuple)):
-            transcript = " ".join(str(item) for item in transcript)
-        return str(transcript).strip()
+        predicted_ids = torch.argmax(logits, dim=-1)
+        transcript = processor.batch_decode(predicted_ids)[0]
+        return transcript.strip()
     except STTError:
         raise
     except Exception as exc:
@@ -168,14 +110,8 @@ def _wav_data_to_pcm_bytes(data: np.ndarray) -> bytes:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        try:
-            _load_model()
-            logger.info("IndicConformer load smoke test passed")
-            sys.stdout.write("IndicConformer load smoke test passed\n")
-            sys.exit(0)
-        except Exception as exc:
-            logger.error("IndicConformer load smoke test failed: %s", exc)
-            sys.exit(1)
+        logger.error("Usage: python transcription/indic_conformer_stt.py <audio_file.wav>")
+        sys.exit(1)
 
     audio_file_path = sys.argv[1]
     try:

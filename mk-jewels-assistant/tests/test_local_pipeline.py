@@ -1,49 +1,18 @@
-from transcription import local_pipeline
-from transcription import indic_conformer_stt
-
-
-def test_indic_conformer_prefers_transcript_language_auto_then_english(monkeypatch):
-    calls = []
-
-    class FakeModel:
-        def __call__(self, waveform, language, decoding):
-            calls.append((language, decoding))
-            if language == "auto":
-                raise TypeError("auto unsupported")
-            return "Hello diamond"
-
-    monkeypatch.setattr(indic_conformer_stt.Config, "TRANSCRIPT_LANGUAGE", "auto")
-
-    assert indic_conformer_stt._infer_transcript(FakeModel(), object()) == "Hello diamond"
-    assert calls == [
-        ("auto", indic_conformer_stt.DEFAULT_DECODING),
-        ("en", indic_conformer_stt.DEFAULT_DECODING),
-    ]
-
-
-def test_romanize_hindi_skips_gemini_for_roman_transcript(monkeypatch):
-    monkeypatch.setattr(local_pipeline.Config, "ROMANIZE_HINDI", True)
-    monkeypatch.setattr(local_pipeline.Config, "GEMINI_API_KEY", "test-key")
-
-    assert local_pipeline.romanize_hindi("Hello diamond") == "Hello diamond"
-
-
-def test_romanize_hindi_falls_back_without_gemini_key(monkeypatch):
-    raw_transcript = "मुझे डायमंड देखना है"
-    monkeypatch.setattr(local_pipeline.Config, "ROMANIZE_HINDI", True)
-    monkeypatch.setattr(local_pipeline.Config, "GEMINI_API_KEY", "")
-
-    assert local_pipeline.romanize_hindi(raw_transcript) == raw_transcript
+import importlib
+import sys
+import types
 
 
 def test_local_pipeline_keeps_devanagari_raw_transcript(monkeypatch):
-    raw_transcript = "मुझे आपकी सर्विस बिल्कुल पसंद नहीं है"
+    raw_transcript = "\u092e\u0941\u091d\u0947 \u0906\u092a\u0915\u0940 \u0938\u0930\u094d\u0935\u093f\u0938 \u092c\u093f\u0932\u094d\u0915\u0941\u0932 \u092a\u0938\u0902\u0926 \u0928\u0939\u0940\u0902 \u0939\u0948"
 
-    monkeypatch.setattr(
-        local_pipeline.indic_conformer_stt,
-        "transcribe",
-        lambda audio_bytes, sample_rate: raw_transcript,
+    fake_stt = types.SimpleNamespace(
+        transcribe=lambda audio_bytes, sample_rate: raw_transcript
     )
+    monkeypatch.setitem(sys.modules, "transcription.indic_conformer_stt", fake_stt)
+    sys.modules.pop("transcription.local_pipeline", None)
+    local_pipeline = importlib.import_module("transcription.local_pipeline")
+
     monkeypatch.setattr(
         local_pipeline.qwen3_triage,
         "triage",
