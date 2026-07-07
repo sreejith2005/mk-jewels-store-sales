@@ -7,7 +7,7 @@ flask-cors
 websockets>=16.0
 psycopg2-binary
 apscheduler
-transformers
+transformers==4.57.6
 torch
 torchaudio
 onnx

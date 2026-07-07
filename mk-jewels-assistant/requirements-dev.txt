@@ -1,0 +1,5 @@
+# For local/eval tooling only. DO NOT install this into the same
+# venv as the production backend service - see requirements.txt.
+-r requirements.txt
+IndicTransToolkit
+sentencepiece

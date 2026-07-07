@@ -17,25 +17,39 @@ logger = get_logger(__name__)
 
 MODEL_ID = "ai4bharat/indic-conformer-600m-multilingual"
 TARGET_SAMPLE_RATE = 16000
+DEFAULT_DECODING = "ctc"
+
+_model = None
 
 
-def _load_model() -> tuple[object, object]:
-    """Load the IndicConformer processor and CTC model."""
+def _load_model() -> object:
+    """Load and cache the custom IndicConformer model."""
+    global _model
+    if _model is not None:
+        return _model
+
     try:
         import torch
-        from transformers import AutoModelForCTC, AutoProcessor
+        from transformers import AutoModel
 
-        processor = AutoProcessor.from_pretrained(MODEL_ID)
-        model = AutoModelForCTC.from_pretrained(MODEL_ID)
-        model.to(Config.DEVICE)
+        if Config.DEVICE == "cuda" and not torch.cuda.is_available():
+            logger.warning("CUDA requested but unavailable; falling back to CPU")
+
+        model_kwargs = {"trust_remote_code": True}
+        token = Config.HUGGINGFACE_TOKEN.strip() or None
+        if token:
+            model_kwargs["token"] = token
+
+        model = AutoModel.from_pretrained(MODEL_ID, **model_kwargs)
         model.eval()
         logger.info("IndicConformer model loaded on %s", Config.DEVICE)
-        return processor, model
+        _model = model
+        return _model
     except Exception as exc:
         raise STTError(f"Failed to load IndicConformer model: {exc}") from exc
 
 
-processor, model = _load_model()
+model = _load_model()
 
 
 def _pcm_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
@@ -73,19 +87,19 @@ def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
         if audio.size == 0 or not np.any(audio):
             return ""
 
-        inputs = processor(
-            audio,
-            sampling_rate=TARGET_SAMPLE_RATE,
-            return_tensors="pt",
-        )
-        input_values = inputs.input_values.to(Config.DEVICE)
+        waveform = torch.from_numpy(audio).float().unsqueeze(0)
+        stt_model = _load_model()
 
         with torch.no_grad():
-            logits = model(input_values).logits
+            transcript = stt_model(
+                waveform,
+                Config.INDIC_CONFORMER_LANGUAGE,
+                DEFAULT_DECODING,
+            )
 
-        predicted_ids = torch.argmax(logits, dim=-1)
-        transcript = processor.batch_decode(predicted_ids)[0]
-        return transcript.strip()
+        if isinstance(transcript, (list, tuple)):
+            transcript = " ".join(str(item) for item in transcript)
+        return str(transcript).strip()
     except STTError:
         raise
     except Exception as exc:
@@ -110,8 +124,14 @@ def _wav_data_to_pcm_bytes(data: np.ndarray) -> bytes:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        logger.error("Usage: python transcription/indic_conformer_stt.py <audio_file.wav>")
-        sys.exit(1)
+        try:
+            _load_model()
+            logger.info("IndicConformer load smoke test passed")
+            sys.stdout.write("IndicConformer load smoke test passed\n")
+            sys.exit(0)
+        except Exception as exc:
+            logger.error("IndicConformer load smoke test failed: %s", exc)
+            sys.exit(1)
 
     audio_file_path = sys.argv[1]
     try:

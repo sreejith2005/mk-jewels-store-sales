@@ -42,19 +42,18 @@ def load_models() -> bool:
 
     try:
         stt_start = time.perf_counter()
-        processor, stt_model = indic_conformer_stt._load_model()
+        stt_model = indic_conformer_stt._load_model()
 
         import torch
 
         silent_audio = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
-        inputs = processor(
-            silent_audio,
-            sampling_rate=sample_rate,
-            return_tensors="pt",
-        )
-        input_values = inputs.input_values.to(Config.DEVICE)
+        waveform = torch.from_numpy(silent_audio).float().unsqueeze(0)
         with torch.no_grad():
-            _ = stt_model(input_values).logits
+            _ = stt_model(
+                waveform,
+                Config.INDIC_CONFORMER_LANGUAGE,
+                indic_conformer_stt.DEFAULT_DECODING,
+            )
         logger.info("IndicConformer warmup completed in %.2fs", time.perf_counter() - stt_start)
     except Exception:
         logger.critical("IndicConformer warmup failed.", exc_info=True)

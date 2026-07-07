@@ -33,6 +33,7 @@ class Config:
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
+    INDIC_CONFORMER_LANGUAGE = os.getenv("INDIC_CONFORMER_LANGUAGE", "hi")
     USE_LOCAL_DISPLAY_NORMALIZATION = (
         os.getenv("USE_LOCAL_DISPLAY_NORMALIZATION", "true").lower() == "true"
     )
