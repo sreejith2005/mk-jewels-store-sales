@@ -59,7 +59,7 @@ BOOL_EVENT_KEYS = {
 
 def _coerce_bool(value) -> bool:
     if isinstance(value, str):
-        return value.lower() == "true"
+        return value.lower() in ("true", "1", "yes")
     return bool(value)
 
 

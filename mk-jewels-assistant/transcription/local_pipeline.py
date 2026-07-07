@@ -215,7 +215,7 @@ def transcribe_and_triage(
                 transcript,
                 exc_info=True,
             )
-            return _empty_event(transcript, "triage failed")
+            return _empty_event(transcript, "triage unavailable")
 
         logger.info(
             "Triage completed: priority=%s, salesperson=%s",

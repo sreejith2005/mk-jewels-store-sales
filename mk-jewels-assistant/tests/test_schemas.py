@@ -57,10 +57,10 @@ def test_validate_event_coerces_price_concern_to_false():
 
 def test_validate_event_coerces_string_booleans():
     event = valid_event()
-    event["objection_detected"] = "true"
+    event["objection_detected"] = "yes"
     event["price_concern"] = "false"
     event["certification_question"] = "FALSE"
-    event["intent_signal"] = "TRUE"
+    event["intent_signal"] = "1"
     event["script_deviation"] = "false"
     event["factual_error"] = "true"
     event["missed_script_response"] = "FALSE"

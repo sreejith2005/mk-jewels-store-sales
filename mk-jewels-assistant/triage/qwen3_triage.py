@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,14 +51,29 @@ def _load_kb_json(filename: str) -> dict[str, Any]:
 OBJECTION_RULES = _load_kb_json("objection_rules.json")
 PRODUCT_FACTS = _load_kb_json("product_facts.json")
 
-SYSTEM_PROMPT = (
-    "You are an AI assistant monitoring sales conversations at a jewelry store in India. "
-    "The salesperson may speak in English, Hindi, Marathi, or a mix of all three. "
-    "You will receive an already-transcribed conversation. Your job is to classify it. "
-    "Jewelry-specific terms you will encounter include: hallmark, BIS, HUID, carat, "
-    "VVS, solitaire, kundan, polki, making charges, exchange scheme, IGI, GIA, "
-    "solitaire, rhodium. Preserve these terms exactly as spoken."
-)
+SYSTEM_PROMPT = """You are a sales conversation classifier.
+Analyze the conversation and return ONLY a JSON object.
+No explanation, no markdown, no preamble. Only JSON.
+
+JSON format:
+{
+  "objection_detected": true/false,
+  "price_concern": true/false,
+  "certification_question": true/false,
+  "upsell_miss": true/false,
+  "knowledge_gap": true/false,
+  "intent_signal": true/false,
+  "alert_priority": "none/low/medium/high",
+  "reasoning": "max 15 words"
+}
+
+Rules:
+- price_concern: true if customer mentions price, cost, expensive, discount
+- objection_detected: true if customer shows resistance or doubt
+- intent_signal: true if customer shows buying interest
+- alert_priority high: if salesperson is rude or gives wrong facts
+- alert_priority medium: if salesperson misses obvious opportunity
+- alert_priority none: normal conversation"""
 
 CRITICAL_ALERT_CALIBRATION_RULES = (
     "CRITICAL ALERT CALIBRATION RULES - read carefully before classifying:\n\n"
@@ -218,9 +234,12 @@ def _parse_json_response(text: str) -> dict[str, Any]:
         text = text[3:]
     if text.endswith("```"):
         text = text[:-3]
+    text = text.strip()
+    if text.startswith("{") and not text.endswith("}"):
+        text += "}"
 
     try:
-        return json.loads(text.strip())
+        return json.loads(text)
     except json.JSONDecodeError as error:
         raise TriageError(f"Invalid JSON from Qwen3: {raw_text[:200]}") from error
 
@@ -277,36 +296,56 @@ def _empty_event() -> dict:
     )
 
 
+def _fallback_event(transcript: str) -> dict:
+    return _validate_triage_result(
+        {
+            "transcript": transcript,
+            "raw_transcript": transcript,
+            "display_transcript": transcript,
+            "triage_status": "unavailable",
+            "objection_detected": False,
+            "price_concern": False,
+            "certification_question": False,
+            "upsell_miss": False,
+            "knowledge_gap": False,
+            "intent_signal": False,
+            "alert_priority": "none",
+            "reasoning": "triage unavailable",
+            "knowledge_base_followed": True,
+        }
+    )
+
+
 def triage(transcript: str, salesperson_name: str) -> dict:
     """Classify an English-language transcript with Qwen3 via Ollama."""
     transcript_text = transcript.strip()
     if not transcript_text:
         logger.info("Skipping Qwen3 triage for empty transcript.")
         return _empty_event()
-    display_instruction = (
-        "Normalize display_transcript for readable store-owner Hinglish."
-        if Config.USE_LOCAL_DISPLAY_NORMALIZATION
-        else "Set display_transcript exactly equal to the input transcript."
-    )
+
+    full_prompt = f"Classify this conversation:\n{transcript_text}"
 
     payload = {
         "model": MODEL_NAME,
         "stream": False,
-        "options": {"num_predict": 260, "temperature": 0},
+        "think": False,
+        "options": {
+            "num_predict": 150,
+            "temperature": 0,
+            "stop": ["}"],
+        },
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": USER_PROMPT_TEMPLATE.format(
-                    salesperson_name=salesperson_name,
-                    transcript=transcript,
-                    kb_context=f"{display_instruction}\n\n{build_kb_context(transcript)}",
-                    calibration_rules=CRITICAL_ALERT_CALIBRATION_RULES,
-                ),
+                "content": full_prompt,
             },
         ],
     }
 
+    logger.info(f"Triage input transcript length: {len(transcript)} chars")
+    logger.info(f"Triage prompt total length: {len(full_prompt)} chars")
+    logger.info(f"Sending to Ollama at {Config.OLLAMA_HOST}")
     logger.info(
         "Qwen3 triage request transcript for %s: %r",
         salesperson_name,
@@ -315,26 +354,47 @@ def triage(transcript: str, salesperson_name: str) -> dict:
 
     raw_response_text = ""
     raw_text = ""
-    try:
-        response = requests.post(
-            f"{Config.OLLAMA_HOST}/api/chat",
-            json=payload,
-            timeout=(5, 60),
-        )
-        response.raise_for_status()
-    except requests.RequestException as error:
+    response_json = None
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                f"{Config.OLLAMA_HOST}/api/chat",
+                json=payload,
+                timeout=(5, 90),
+            )
+            raw_response_text = response.text
+            logger.info(f"Ollama response status: {response.status_code}")
+            logger.info(
+                f"Ollama raw response (first 500 chars): {response.text[:500]}"
+            )
+            if response.status_code == 200:
+                response_json = response.json()
+                raw_text = response_json.get("message", {}).get("content", "")
+                if response_json.get("done") and raw_text:
+                    break
+            logger.warning(f"Triage attempt {attempt + 1} got empty/bad response")
+        except requests.Timeout:
+            logger.warning(f"Triage attempt {attempt + 1} timed out")
+        except (requests.RequestException, ValueError):
+            logger.warning(
+                "Triage attempt %d failed while calling Ollama",
+                attempt + 1,
+                exc_info=True,
+            )
+        if attempt < 2:
+            time.sleep(2**attempt)
+    else:
         logger.error(
-            "Ollama triage request failed. Raw transcript: %r",
+            "Qwen3 triage unavailable after retries. Raw transcript: %r; "
+            "raw HTTP response: %r; raw content: %r",
             transcript,
-            exc_info=True,
+            raw_response_text,
+            raw_text,
         )
-        raise TriageError(f"Ollama unreachable: {error}") from error
+        return _fallback_event(transcript)
 
     try:
-        raw_response_text = response.text
         logger.info("Raw Qwen3 triage HTTP response: %s", raw_response_text)
-        response_json = response.json()
-        raw_text = response_json["message"]["content"]
         logger.info("Raw Qwen3 triage response content: %s", raw_text)
         result = _parse_json_response(raw_text)
         result["raw_transcript"] = transcript
@@ -351,9 +411,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
             raw_text,
             exc_info=True,
         )
-        if isinstance(error, TriageError):
-            raise
-        raise TriageError(f"Invalid Qwen3 response: {error}") from error
+        return _fallback_event(transcript)
 
 
 def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]:
