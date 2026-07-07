@@ -20,11 +20,21 @@ TARGET_SAMPLE_RATE = 16000
 DEFAULT_DECODING = "ctc"
 
 _model = None
+_model_debug_logged = False
+
+
+def _language_preferences() -> list[str]:
+    preferred = (Config.TRANSCRIPT_LANGUAGE or Config.INDIC_CONFORMER_LANGUAGE).lower()
+    if preferred == "en":
+        return ["en", "auto", "hi"]
+    if preferred == "hi":
+        return ["hi", "auto", "en"]
+    return ["auto", "en", "hi"]
 
 
 def _load_model() -> object:
     """Load and cache the custom IndicConformer model."""
-    global _model
+    global _model, _model_debug_logged
     if _model is not None:
         return _model
 
@@ -47,9 +57,47 @@ def _load_model() -> object:
         model.eval()
         _model = model
         logger.info("IndicConformer model loaded on %s", device)
+        if not _model_debug_logged:
+            logger.debug("IndicConformer model type: %s", type(model))
+            logger.debug("IndicConformer model dir: %s", dir(model))
+            _model_debug_logged = True
         return _model
     except Exception as exc:
         raise STTError(f"Failed to load IndicConformer model: {exc}") from exc
+
+
+def _infer_transcript(stt_model: object, waveform: object) -> str:
+    """Call IndicConformer with explicit language preference and safe fallbacks."""
+    last_error = None
+    for language in _language_preferences():
+        try:
+            logger.info("IndicConformer transcription language preference: %s", language)
+            if hasattr(stt_model, "transcribe"):
+                try:
+                    return stt_model.transcribe(
+                        waveform,
+                        language=language,
+                        decoding=DEFAULT_DECODING,
+                    )
+                except TypeError:
+                    return stt_model.transcribe(waveform, language, DEFAULT_DECODING)
+            return stt_model(waveform, language, DEFAULT_DECODING)
+        except TypeError as exc:
+            last_error = exc
+            logger.warning(
+                "IndicConformer rejected language=%s; trying next preference: %s",
+                language,
+                exc,
+            )
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "IndicConformer transcription failed with language=%s; trying next preference: %s",
+                language,
+                exc,
+            )
+
+    raise STTError(f"IndicConformer transcription failed for all languages: {last_error}")
 
 
 def _pcm_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
@@ -91,11 +139,7 @@ def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
         stt_model = _load_model()
 
         with torch.no_grad():
-            transcript = stt_model(
-                waveform,
-                Config.INDIC_CONFORMER_LANGUAGE,
-                DEFAULT_DECODING,
-            )
+            transcript = _infer_transcript(stt_model, waveform)
 
         if isinstance(transcript, (list, tuple)):
             transcript = " ".join(str(item) for item in transcript)

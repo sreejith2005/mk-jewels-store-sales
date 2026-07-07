@@ -26,6 +26,55 @@ logger.info(
 _MODELS_WARMED_UP = False
 
 
+def _contains_devanagari(text: str) -> bool:
+    return any("\u0900" <= char <= "\u097f" for char in text)
+
+
+def romanize_hindi(transcript: str) -> str:
+    """Convert Devanagari transcript text to readable Roman-script Hinglish."""
+    logger.info(f"ROMANIZE_HINDI config: {Config.ROMANIZE_HINDI}")
+    logger.info(f"GEMINI_API_KEY present: {bool(Config.GEMINI_API_KEY)}")
+    logger.info(f"Transcript before romanization: {transcript[:50]}")
+
+    if not Config.ROMANIZE_HINDI or not transcript or not _contains_devanagari(transcript):
+        logger.info(f"Transcript after romanization: {transcript[:50]}")
+        return transcript
+
+    if not Config.GEMINI_API_KEY:
+        logger.warning(
+            "ROMANIZE_HINDI is enabled but GEMINI_API_KEY is missing; using original transcript"
+        )
+        logger.info(f"Transcript after romanization: {transcript[:50]}")
+        return transcript
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=Config.GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                "Convert this transcript to natural Roman-script Hinglish/English. "
+                "Preserve English jewelry terms like diamond, hallmark, BIS, HUID, "
+                "carat, solitaire, kundan, polki, making charges, IGI, and GIA. "
+                "Return only the converted transcript, with no explanation.\n\n"
+                f"{transcript}"
+            ),
+            config=types.GenerateContentConfig(
+                temperature=0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        result = (response.text or "").strip() or transcript
+        logger.info(f"Transcript after romanization: {result[:50]}")
+        return result
+    except Exception:
+        logger.error("Gemini romanization failed; using original transcript", exc_info=True)
+        logger.info(f"Transcript after romanization: {transcript[:50]}")
+        return transcript
+
+
 def load_models() -> bool:
     """Load and verify startup models before accepting production audio."""
     global _MODELS_WARMED_UP
@@ -50,11 +99,7 @@ def load_models() -> bool:
             np.zeros(int(sample_rate * 0.5), dtype=np.float32)
         ).float().unsqueeze(0)
         with torch.no_grad():
-            stt_model(
-                silent_waveform,
-                Config.INDIC_CONFORMER_LANGUAGE,
-                indic_conformer_stt.DEFAULT_DECODING,
-            )
+            indic_conformer_stt._infer_transcript(stt_model, silent_waveform)
         logger.info("IndicConformer warmup completed in %.2fs", time.perf_counter() - stt_start)
     except Exception:
         logger.critical("IndicConformer warmup failed.", exc_info=True)
@@ -161,6 +206,7 @@ def transcribe_and_triage(
 
     start_time = time.perf_counter()
     transcript = ""
+    raw_transcript = ""
 
     try:
         if Config.DIARIZATION_ENABLED:
@@ -191,23 +237,28 @@ def transcribe_and_triage(
                 logger.error("Diarization failed, using full audio: %s", error)
 
         try:
-            transcript = indic_conformer_stt.transcribe(audio_bytes, sample_rate)
+            raw_transcript = indic_conformer_stt.transcribe(audio_bytes, sample_rate)
         except STTError as error:
             logger.error("STT failed for %s: %s", salesperson_name, error)
             return _empty_event("", "STT failed")
 
-        if not transcript:
+        if not raw_transcript:
             logger.warning("Empty transcript from STT, skipping triage")
             return _empty_event("", "STT failed")
 
+        transcript = romanize_hindi(raw_transcript)
+
         logger.info(
             "STT completed: %s chars, salesperson=%s",
-            len(transcript),
+            len(raw_transcript),
             salesperson_name,
         )
 
         try:
             event = validate_event(qwen3_triage.triage(transcript, salesperson_name))
+            event["raw_transcript"] = raw_transcript
+            event["display_transcript"] = event.get("display_transcript") or transcript
+            event["transcript"] = event["display_transcript"]
         except TriageError:
             logger.error(
                 "Triage failed for %s. Raw transcript passed to triage: %r",
