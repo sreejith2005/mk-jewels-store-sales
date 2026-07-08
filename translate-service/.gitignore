@@ -1,0 +1,7 @@
+venv/
+python311/
+python-*.exe
+__pycache__/
+*.py[cod]
+*.log
+*.pid
