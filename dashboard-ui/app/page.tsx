@@ -632,8 +632,9 @@ export default function Page() {
   const [selectedSalesperson, setSelectedSalesperson] = useState<Salesperson | null>(
     null,
   );
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [sessionSelectionPaused, setSessionSelectionPaused] = useState(false);
+  const [, setIsSessionSelectionUserControlled] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [sessionScore, setSessionScore] = useState<SessionScore | null>(null);
   const [sessionScoreError, setSessionScoreError] = useState<string | null>(null);
@@ -649,6 +650,10 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [, setLastUpdated] = useState<Date | null>(null);
   const renderedEventIdsRef = useRef<Set<string>>(new Set());
+  const selectedSessionIdRef = useRef<string | null>(null);
+  const sessionSelectionUserControlledRef = useRef(false);
+  const conversationRequestIdRef = useRef(0);
+  const loadedEventsSessionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const token = TokenStore.load();
@@ -801,24 +806,37 @@ export default function Page() {
       return;
     }
 
+    const requestId = ++conversationRequestIdRef.current;
     setError(null);
     setIsLoadingConversation(true);
 
     try {
       const nextSessions = await fetchSessions(authFetch, selectedStore.id);
-      const nextSelectedSession = selectedSession
+      if (requestId !== conversationRequestIdRef.current) {
+        return;
+      }
+
+      const currentSelectedSessionId = selectedSessionIdRef.current;
+      let nextSelectedSession = currentSelectedSessionId
         ? nextSessions.find(
-          (session) => session.session_id === selectedSession.session_id,
+          (session) => session.session_id === currentSelectedSessionId,
         ) ?? null
-        : sessionSelectionPaused
-          ? null
-          : newestSessionForSalesperson(nextSessions, selectedSalesperson);
+        : null;
+
+      if (!nextSelectedSession) {
+        nextSelectedSession = newestSessionForSalesperson(nextSessions, selectedSalesperson);
+        selectedSessionIdRef.current = nextSelectedSession?.session_id ?? null;
+        setSelectedSessionId(nextSelectedSession?.session_id ?? null);
+        sessionSelectionUserControlledRef.current = false;
+        setIsSessionSelectionUserControlled(false);
+      }
 
       setStoreSessions(nextSessions);
       setSelectedSession(nextSelectedSession);
 
       if (!nextSelectedSession) {
         renderedEventIdsRef.current = new Set();
+        loadedEventsSessionIdRef.current = null;
         setEvents([]);
         setStats(emptyStats);
         setSessionScore(null);
@@ -826,10 +844,24 @@ export default function Page() {
         return;
       }
 
+      if (loadedEventsSessionIdRef.current !== nextSelectedSession.session_id) {
+        renderedEventIdsRef.current = new Set();
+        loadedEventsSessionIdRef.current = nextSelectedSession.session_id;
+        setEvents([]);
+        setStats(emptyStats);
+        setSessionScore(null);
+      }
+
       const [nextEvents, nextStats] = await Promise.all([
         fetchEvents(authFetch, nextSelectedSession.session_id),
         fetchStats(authFetch, nextSelectedSession.session_id),
       ]);
+      if (
+        requestId !== conversationRequestIdRef.current ||
+        selectedSessionIdRef.current !== nextSelectedSession.session_id
+      ) {
+        return;
+      }
 
       setEvents((previous) => {
         const mergedEvents = mergeEventsById(previous, nextEvents);
@@ -843,9 +875,11 @@ export default function Page() {
         loadError instanceof Error ? loadError.message : "Conversation refresh failed",
       );
     } finally {
-      setIsLoadingConversation(false);
+      if (requestId === conversationRequestIdRef.current) {
+        setIsLoadingConversation(false);
+      }
     }
-  }, [authFetch, selectedSalesperson, selectedSession, selectedStore, sessionSelectionPaused]);
+  }, [authFetch, selectedSalesperson, selectedStore]);
 
   const loadSelectedSessionScore = useCallback(async () => {
     if (!selectedSession) {
@@ -989,19 +1023,30 @@ export default function Page() {
   );
 
   const selectSession = useCallback(async (session: Session) => {
+    const requestId = ++conversationRequestIdRef.current;
     setError(null);
     setIsLoadingConversation(true);
+    selectedSessionIdRef.current = session.session_id;
+    sessionSelectionUserControlledRef.current = true;
+    setSelectedSessionId(session.session_id);
     setSelectedSession(session);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(true);
 
     try {
       const [nextEvents, nextStats] = await Promise.all([
         fetchEvents(authFetch, session.session_id),
         fetchStats(authFetch, session.session_id),
       ]);
+      if (
+        requestId !== conversationRequestIdRef.current ||
+        selectedSessionIdRef.current !== session.session_id
+      ) {
+        return;
+      }
 
       const sortedEvents = sortEventsChronologically(nextEvents);
       renderedEventIdsRef.current = new Set(sortedEvents.map(eventStableId));
+      loadedEventsSessionIdRef.current = session.session_id;
       setEvents(sortedEvents);
       setStats({ ...emptyStats, ...nextStats });
       setLastUpdated(new Date());
@@ -1010,7 +1055,9 @@ export default function Page() {
         loadError instanceof Error ? loadError.message : "Conversation refresh failed",
       );
     } finally {
-      setIsLoadingConversation(false);
+      if (requestId === conversationRequestIdRef.current) {
+        setIsLoadingConversation(false);
+      }
     }
   }, [authFetch]);
 
@@ -1026,9 +1073,14 @@ export default function Page() {
       );
 
       if (selectedSession?.session_id === sessionId) {
+        conversationRequestIdRef.current += 1;
+        selectedSessionIdRef.current = null;
+        sessionSelectionUserControlledRef.current = false;
+        setSelectedSessionId(null);
         setSelectedSession(null);
-        setSessionSelectionPaused(true);
+        setIsSessionSelectionUserControlled(false);
         renderedEventIdsRef.current = new Set();
+        loadedEventsSessionIdRef.current = null;
         setEvents([]);
         setStats(emptyStats);
         setSessionScore(null);
@@ -1040,12 +1092,17 @@ export default function Page() {
   );
 
   const selectStore = (store: Store) => {
+    conversationRequestIdRef.current += 1;
     setView("stores");
     setSelectedStore(store);
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1054,10 +1111,15 @@ export default function Page() {
   };
 
   const selectSalesperson = (salesperson: Salesperson) => {
+    conversationRequestIdRef.current += 1;
     setSelectedSalesperson(salesperson);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1066,12 +1128,17 @@ export default function Page() {
   };
 
   const backToStores = () => {
+    conversationRequestIdRef.current += 1;
     setView("stores");
     setSelectedStore(null);
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setSalespersons([]);
     setStoreSessions([]);
     setEvents([]);
@@ -1088,12 +1155,17 @@ export default function Page() {
   };
 
   const openReports = () => {
+    conversationRequestIdRef.current += 1;
     setView("reports");
     setSelectedStore(null);
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1103,12 +1175,17 @@ export default function Page() {
   };
 
   const openAlerts = () => {
+    conversationRequestIdRef.current += 1;
     setView("alerts");
     setSelectedStore(null);
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1118,12 +1195,17 @@ export default function Page() {
   };
 
   const openScores = () => {
+    conversationRequestIdRef.current += 1;
     setView("scores");
     setSelectedStore(null);
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1133,10 +1215,15 @@ export default function Page() {
   };
 
   const backToSalespersons = () => {
+    conversationRequestIdRef.current += 1;
     setSelectedSalesperson(null);
+    selectedSessionIdRef.current = null;
+    sessionSelectionUserControlledRef.current = false;
+    setSelectedSessionId(null);
     setSelectedSession(null);
-    setSessionSelectionPaused(false);
+    setIsSessionSelectionUserControlled(false);
     renderedEventIdsRef.current = new Set();
+    loadedEventsSessionIdRef.current = null;
     setEvents([]);
     setStats(emptyStats);
     setSessionScore(null);
@@ -1287,6 +1374,7 @@ export default function Page() {
                 salesperson={selectedSalesperson}
                 sessionScore={sessionScore}
                 sessionScoreError={sessionScoreError}
+                selectedSessionId={selectedSessionId}
                 selectedSession={selectedSession}
                 isGeneratingSessionScore={isGeneratingSessionScore}
                 onGenerateSessionScore={generateSelectedSessionScore}
@@ -2491,6 +2579,7 @@ function ConversationView({
   salesperson,
   sessionScore,
   sessionScoreError,
+  selectedSessionId,
   selectedSession,
   isGeneratingSessionScore,
   stats,
@@ -2507,6 +2596,7 @@ function ConversationView({
   salesperson: Salesperson;
   sessionScore: SessionScore | null;
   sessionScoreError: string | null;
+  selectedSessionId: string | null;
   selectedSession: Session | null;
   isGeneratingSessionScore: boolean;
   stats: Stats;
@@ -2611,7 +2701,7 @@ function ConversationView({
                     key={session.session_id}
                     confirmingDelete={confirmingDeleteId === session.session_id}
                     isDeleting={deletingSessionId === session.session_id}
-                    isSelected={selectedSession?.session_id === session.session_id}
+                    isSelected={selectedSessionId === session.session_id}
                     onCancelDelete={() => {
                       setConfirmingDeleteId(null);
                       setDeleteError(null);

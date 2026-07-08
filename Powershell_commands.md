@@ -1,6 +1,38 @@
 Save this as **MK Jewels AWS Production Commands**.
 
 ---
+# MAIN COMMANDS AFTER PUSHING (Can copy)
+
+# SSH in
+ssh -i "C:\Users\MIS\Documents\aws-keys\mkjewels-prod-key.pem" ubuntu@YOUR_ELASTIC_IP
+
+# Pull latest code
+cd ~/mk-jewels-store-sales
+git pull origin main
+
+# Rebuild frontend
+cd dashboard-ui
+npm install
+npm run build
+
+# Restart frontend
+pm2 restart all
+
+# Restart backend
+cd ../mk-jewels-assistant
+source venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart mkjewels-backend.service
+
+# Verify everything is up
+sudo systemctl status mkjewels-backend.service
+pm2 status
+
+# Watch backend come up (wait until you see "System ready - all models loaded")
+sudo journalctl -u mkjewels-backend.service -f
+
+
+
 
 # 1. SSH into AWS server
 
