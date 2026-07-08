@@ -36,6 +36,9 @@ def generate_and_save_session_score(
         salesperson_name = str(events[0].get("salesperson_name") or "Unknown")
         store_name = _store_name_for_session(database, session_id) or "MK Jewels"
         scores = score_session("\n".join(transcripts), salesperson_name)
+        if scores is None:
+            logger.info("Leaving score pending for %s: scoring unavailable.", session_id)
+            return None
         database.save_session_score(
             session_id=session_id,
             salesperson_name=salesperson_name,

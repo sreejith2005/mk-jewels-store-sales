@@ -414,7 +414,7 @@ def triage(transcript: str, salesperson_name: str) -> dict:
         return _fallback_event(transcript)
 
 
-def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]:
+def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any] | None:
     """Score a full completed session transcript with Qwen3 via Ollama."""
     transcript_text = full_transcript.strip()
     if not transcript_text:
@@ -424,7 +424,12 @@ def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]
     payload = {
         "model": MODEL_NAME,
         "stream": False,
-        "options": {"num_predict": 220, "temperature": 0},
+        "think": False,
+        "options": {
+            "num_predict": 180,
+            "temperature": 0,
+            "stop": ["}"],
+        },
         "messages": [
             {
                 "role": "user",
@@ -436,21 +441,49 @@ def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]
         ],
     }
 
-    try:
-        response = requests.post(
-            f"{Config.OLLAMA_HOST}/api/chat",
-            json=payload,
-            timeout=(5, 90),
-        )
-        response.raise_for_status()
-    except requests.RequestException as error:
-        logger.error("Ollama session scoring request failed: %s", error)
-        raise TriageError(f"Ollama unreachable: {error}") from error
+    raw_response_text = ""
+    raw_text = ""
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                f"{Config.OLLAMA_HOST}/api/chat",
+                json=payload,
+                timeout=(5, 90),
+            )
+            raw_response_text = response.text
+            logger.info("Ollama session scoring response status: %s", response.status_code)
+            logger.info(
+                "Ollama session scoring raw response (first 500 chars): %s",
+                response.text[:500],
+            )
+            if response.status_code == 200:
+                response_json = response.json()
+                raw_text = response_json.get("message", {}).get("content", "")
+                logger.info("Raw Qwen3 session score response: %s", raw_text)
+                if response_json.get("done") and raw_text.strip():
+                    return _validate_score_result(_parse_json_response(raw_text))
+            logger.warning(
+                "Session scoring attempt %d got empty/bad response",
+                attempt + 1,
+            )
+        except requests.Timeout:
+            logger.warning("Session scoring attempt %d timed out", attempt + 1)
+        except (requests.RequestException, ValueError, KeyError, TypeError, TriageError):
+            logger.warning(
+                "Session scoring attempt %d failed while calling Ollama",
+                attempt + 1,
+                exc_info=True,
+            )
+        if attempt < 2:
+            time.sleep(2**attempt)
 
-    response_json = response.json()
-    raw_text = response_json["message"]["content"]
-    logger.info("Raw Qwen3 session score response: %s", raw_text)
-    return _validate_score_result(_parse_json_response(raw_text))
+    logger.warning(
+        "Qwen3 session scoring unavailable after retries. Leaving session unscored. "
+        "Raw HTTP response: %r; raw content: %r",
+        raw_response_text,
+        raw_text,
+    )
+    return None
 
 
 if __name__ == "__main__":
