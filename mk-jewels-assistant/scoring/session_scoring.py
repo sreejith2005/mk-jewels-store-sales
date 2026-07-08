@@ -39,6 +39,13 @@ def generate_and_save_session_score(
         if scores is None:
             logger.info("Leaving score pending for %s: scoring unavailable.", session_id)
             return None
+        if scores.get("score_status") == "insufficient_data":
+            logger.info(
+                "Leaving score pending for %s: %s",
+                session_id,
+                scores.get("reason", "insufficient transcript evidence"),
+            )
+            return None
         database.save_session_score(
             session_id=session_id,
             salesperson_name=salesperson_name,

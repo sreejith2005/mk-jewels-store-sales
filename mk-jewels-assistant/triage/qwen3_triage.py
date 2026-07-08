@@ -134,24 +134,40 @@ USER_PROMPT_TEMPLATE = (
 
 SESSION_SCORE_PROMPT_TEMPLATE = (
     "You are a jewelry sales coach evaluating a salesperson's performance.\n"
+    "Respond with ONLY valid JSON. No markdown, no code fences, no preamble, "
+    "no explanation outside the JSON.\n\n"
     "Here is the full sales conversation transcript:\n\n"
     "{full_transcript}\n\n"
-    "Score {salesperson_name} on each dimension from 0-10.\n"
+    "Score {salesperson_name} on each dimension from 1-10.\n"
     "Base scores on what actually happened in the transcript.\n"
-    "Be fair but honest - a score of 5 means average, not bad.\n"
-    "7+ means good, 9+ means excellent, below 4 means needs improvement.\n\n"
-    "Return ONLY this JSON, no other text:\n"
+    "Do not invent neutral scores. Very poor behavior can be 1-3, average "
+    "behavior can be 4-6, and strong behavior can be 7-10.\n"
+    "If the transcript is too short or lacks enough evidence to evaluate the "
+    "conversation, return status insufficient_data with the exact reason below "
+    "instead of category scores.\n\n"
+    "For enough evidence, return ONLY this JSON shape:\n"
     "{{\n"
+    '  "score_status": "scored",\n'
     '  "greeting_score": <int 0-10>,\n'
+    '  "greeting_reason": "<brief evidence-based reason>",\n'
     '  "product_knowledge_score": <int 0-10>,\n'
+    '  "product_knowledge_reason": "<brief evidence-based reason>",\n'
     '  "objection_handling_score": <int 0-10>,\n'
+    '  "objection_handling_reason": "<brief evidence-based reason>",\n'
     '  "missed_oppurtuinity": <int 0-10>,\n'
+    '  "missed_oppurtuinity_reason": "<brief evidence-based reason>",\n'
     '  "upsell_score": <int 0-10>,\n'
+    '  "upsell_reason": "<brief evidence-based reason>",\n'
     '  "closing_score": <int 0-10>,\n'
+    '  "closing_reason": "<brief evidence-based reason>",\n'
     '  "customer_satisfaction": "<Positive|Neutral|Negative>",\n'
     '  "score_reasoning": "<max 50 words>"\n'
     "}}\n\n"
-    "If the transcript is too short to evaluate a dimension, score it 5 (neutral)."
+    "For too little evidence, return ONLY:\n"
+    "{{\n"
+    '  "score_status": "insufficient_data",\n'
+    '  "reason": "Conversation too short / not enough transcript"\n'
+    "}}"
 )
 
 SCORE_KEYS = (
@@ -161,6 +177,15 @@ SCORE_KEYS = (
     "missed_oppurtuinity",
     "upsell_score",
     "closing_score",
+)
+
+SCORE_REASON_KEYS = (
+    "greeting_reason",
+    "product_knowledge_reason",
+    "objection_handling_reason",
+    "missed_oppurtuinity_reason",
+    "upsell_reason",
+    "closing_reason",
 )
 
 
@@ -255,12 +280,23 @@ def _clamp_score(value: Any) -> int:
     try:
         score = int(value)
     except (TypeError, ValueError):
-        return 5
+        raise ValueError(f"Invalid score value: {value!r}") from None
     return max(0, min(score, 10))
 
 
 def _validate_score_result(result: dict[str, Any]) -> dict[str, Any]:
-    scores = {key: _clamp_score(result.get(key, 5)) for key in SCORE_KEYS}
+    score_status = str(result.get("score_status", "scored")).strip().lower()
+    if score_status == "insufficient_data":
+        return {
+            "score_status": "insufficient_data",
+            "reason": "Conversation too short / not enough transcript",
+        }
+
+    missing_keys = [key for key in SCORE_KEYS if key not in result]
+    if missing_keys:
+        raise ValueError(f"Missing score fields: {', '.join(missing_keys)}")
+
+    scores = {key: _clamp_score(result[key]) for key in SCORE_KEYS}
     satisfaction = str(result.get("customer_satisfaction", "Neutral")).strip().lower()
     if satisfaction == "positive":
         customer_satisfaction = "Positive"
@@ -270,11 +306,30 @@ def _validate_score_result(result: dict[str, Any]) -> dict[str, Any]:
         customer_satisfaction = "Neutral"
 
     reasoning_words = str(result.get("score_reasoning", "")).strip().split()
+    reasons = {
+        key: " ".join(str(result.get(key, "")).strip().split()[:30])
+        for key in SCORE_REASON_KEYS
+    }
     return {
+        "score_status": "scored",
         **scores,
+        **reasons,
         "customer_satisfaction": customer_satisfaction,
         "score_reasoning": " ".join(reasoning_words[:50]),
     }
+
+
+def _insufficient_score_result() -> dict[str, Any]:
+    return {
+        "score_status": "insufficient_data",
+        "reason": "Conversation too short / not enough transcript",
+    }
+
+
+def _has_enough_score_evidence(transcript_text: str) -> bool:
+    words = transcript_text.split()
+    non_empty_lines = [line for line in transcript_text.splitlines() if line.strip()]
+    return len(words) >= 25 and len(non_empty_lines) >= 2
 
 
 def _empty_event() -> dict:
@@ -419,16 +474,18 @@ def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]
     transcript_text = full_transcript.strip()
     if not transcript_text:
         logger.info("Skipping Qwen3 session scoring for empty transcript.")
-        return _validate_score_result({})
+        return _insufficient_score_result()
+    if not _has_enough_score_evidence(transcript_text):
+        logger.info("Skipping Qwen3 session scoring: insufficient transcript evidence.")
+        return _insufficient_score_result()
 
     payload = {
         "model": MODEL_NAME,
         "stream": False,
         "think": False,
         "options": {
-            "num_predict": 180,
+            "num_predict": 700,
             "temperature": 0,
-            "stop": ["}"],
         },
         "messages": [
             {
@@ -468,10 +525,11 @@ def score_session(full_transcript: str, salesperson_name: str) -> dict[str, Any]
             )
         except requests.Timeout:
             logger.warning("Session scoring attempt %d timed out", attempt + 1)
-        except (requests.RequestException, ValueError, KeyError, TypeError, TriageError):
+        except (requests.RequestException, ValueError, KeyError, TypeError, TriageError) as error:
             logger.warning(
-                "Session scoring attempt %d failed while calling Ollama",
+                "Session scoring attempt %d failed: %s",
                 attempt + 1,
+                error,
                 exc_info=True,
             )
         if attempt < 2:
