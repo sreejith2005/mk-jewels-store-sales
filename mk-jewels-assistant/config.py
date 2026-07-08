@@ -34,6 +34,11 @@ class Config:
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
     INDIC_CONFORMER_LANGUAGE = os.getenv("INDIC_CONFORMER_LANGUAGE", "hi")
+    TRANSLATE_TO_ENGLISH = os.getenv("TRANSLATE_TO_ENGLISH", "true")
+    TRANSLATE_SERVICE_URL = os.getenv(
+        "TRANSLATE_SERVICE_URL",
+        "http://127.0.0.1:8811",
+    )
     USE_LOCAL_DISPLAY_NORMALIZATION = (
         os.getenv("USE_LOCAL_DISPLAY_NORMALIZATION", "true").lower() == "true"
     )

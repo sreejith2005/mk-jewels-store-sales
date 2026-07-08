@@ -26,6 +26,51 @@ logger.info(
 _MODELS_WARMED_UP = False
 
 
+def translate_to_english(text: str) -> str:
+    """Translate transcript text through the standalone local service."""
+    if not text or not text.strip():
+        return text
+
+    if str(Config.TRANSLATE_TO_ENGLISH).lower() != "true":
+        return text
+
+    translate_url = f"{Config.TRANSLATE_SERVICE_URL.rstrip('/')}/translate"
+    for attempt in range(1, 3):
+        try:
+            response = requests.post(
+                translate_url,
+                json={"text": text},
+                timeout=(3, 15),
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"translation service returned HTTP {response.status_code}"
+                )
+
+            response_json = response.json()
+            if "translated" not in response_json:
+                raise RuntimeError("translation service response missing 'translated'")
+
+            return response_json["translated"]
+        except requests.Timeout as error:
+            logger.warning(
+                "Translation attempt %d timed out: %s",
+                attempt,
+                error,
+            )
+        except (requests.RequestException, RuntimeError, ValueError, TypeError) as error:
+            logger.warning(
+                "Translation attempt %d failed: %s",
+                attempt,
+                error,
+            )
+
+        if attempt == 1:
+            time.sleep(1)
+
+    return text
+
+
 def load_models() -> bool:
     """Load and verify startup models before accepting production audio."""
     global _MODELS_WARMED_UP
@@ -96,6 +141,15 @@ def load_models() -> bool:
         logger.critical("Qwen3 warmup failed after all attempts.")
         return False
 
+    translate_sample = "\u0928\u092e\u0938\u094d\u0924\u0947"
+    translated_sample = translate_to_english(translate_sample)
+    if translated_sample == translate_sample and str(Config.TRANSLATE_TO_ENGLISH).lower() == "true":
+        logger.warning(
+            "Translation warmup returned original text; service may be unavailable."
+        )
+    else:
+        logger.info("Translation warmup result: %r", translated_sample)
+
     _MODELS_WARMED_UP = True
     logger.info("Models ready in %.2f seconds", time.perf_counter() - warmup_start)
     return True
@@ -152,7 +206,7 @@ def transcribe_and_triage(
     """
     Transcribe audio with IndicConformer, then triage the transcript with Qwen3.
 
-    openrouter_fallback is accepted only for API compatibility with gemini_stt.
+    openrouter_fallback is accepted only for API compatibility with demo mode.
     Production local pipeline errors are converted into no-signal EventDicts so
     the session loop can continue processing future audio chunks.
     """
@@ -201,6 +255,8 @@ def transcribe_and_triage(
             return _empty_event("", "STT failed")
 
         transcript = raw_transcript
+        if Config.PIPELINE_MODE == "production":
+            transcript = translate_to_english(transcript)
 
         logger.info(
             "STT completed: %s chars, salesperson=%s",
