@@ -824,9 +824,11 @@
       </div>
     </section>
   </main>
+  <audio id="recordingKeepAliveAudio" class="hidden" loop playsinline preload="auto" aria-hidden="true"></audio>
 
   <script>
     const TARGET_SAMPLE_RATE = 16000;
+    const KEEP_ALIVE_AUDIO_VOLUME = 0.01;
 
     const storeScreen = document.getElementById("storeScreen");
     const salespersonScreen = document.getElementById("salespersonScreen");
@@ -867,6 +869,7 @@
     const readinessMessage = document.getElementById("readinessMessage");
     const interruptionBanner = document.getElementById("interruptionBanner");
     const resumeRecordingButton = document.getElementById("resumeRecordingButton");
+    const keepAliveAudio = document.getElementById("recordingKeepAliveAudio");
 
     let wakeLock = null;
     let selectedStore = null;
@@ -891,6 +894,8 @@
     let readinessPollTimer = null;
     let userInitiatedStop = false;
     let reconnectAttempts = 0;
+    let keepAliveAudioUrl = null;
+    let keepAliveAudioStarted = false;
     const MAX_RECONNECT_ATTEMPTS = 5;
 
     wakeLockStatus.textContent = "";
@@ -918,6 +923,130 @@
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       wakeLock = null;
       wakeLockStatus.textContent = "";
+    }
+
+    async function startRecordingKeepAlive() {
+      if (!keepAliveAudio) {
+        return;
+      }
+
+      keepAliveAudio.volume = KEEP_ALIVE_AUDIO_VOLUME;
+      keepAliveAudio.muted = false;
+      keepAliveAudio.loop = true;
+      keepAliveAudio.playsInline = true;
+
+      if (!keepAliveAudioUrl) {
+        keepAliveAudioUrl = URL.createObjectURL(createNearSilentWavBlob());
+      }
+
+      if (keepAliveAudio.src !== keepAliveAudioUrl) {
+        keepAliveAudio.src = keepAliveAudioUrl;
+      }
+
+      try {
+        await keepAliveAudio.play();
+        keepAliveAudioStarted = true;
+        setMediaSessionRecordingState(true);
+      } catch (error) {
+        keepAliveAudioStarted = false;
+        setMediaSessionRecordingState(false);
+        logRecorderEvent("keep_alive_audio_play_failed", "Keep-alive audio playback was blocked or failed.", {
+          error: error.message
+        });
+        throw error;
+      }
+    }
+
+    function stopRecordingKeepAlive() {
+      if (keepAliveAudio) {
+        keepAliveAudio.pause();
+        keepAliveAudio.removeAttribute("src");
+        keepAliveAudio.load();
+      }
+
+      if (keepAliveAudioUrl) {
+        URL.revokeObjectURL(keepAliveAudioUrl);
+        keepAliveAudioUrl = null;
+      }
+
+      keepAliveAudioStarted = false;
+      setMediaSessionRecordingState(false);
+    }
+
+    function createNearSilentWavBlob() {
+      const sampleRate = 8000;
+      const durationSeconds = 1;
+      const sampleCount = sampleRate * durationSeconds;
+      const bytesPerSample = 2;
+      const dataSize = sampleCount * bytesPerSample;
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+
+      writeAscii(view, 0, "RIFF");
+      view.setUint32(4, 36 + dataSize, true);
+      writeAscii(view, 8, "WAVE");
+      writeAscii(view, 12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * bytesPerSample, true);
+      view.setUint16(32, bytesPerSample, true);
+      view.setUint16(34, 8 * bytesPerSample, true);
+      writeAscii(view, 36, "data");
+      view.setUint32(40, dataSize, true);
+
+      for (let index = 0; index < sampleCount; index += 1) {
+        const sample = Math.sin((2 * Math.PI * 440 * index) / sampleRate) * 24;
+        view.setInt16(44 + index * bytesPerSample, sample, true);
+      }
+
+      return new Blob([buffer], { type: "audio/wav" });
+    }
+
+    function writeAscii(view, offset, text) {
+      for (let index = 0; index < text.length; index += 1) {
+        view.setUint8(offset + index, text.charCodeAt(index));
+      }
+    }
+
+    function setMediaSessionRecordingState(active) {
+      if (!("mediaSession" in navigator)) {
+        return;
+      }
+
+      try {
+        if (active) {
+          if ("MediaMetadata" in window) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+              title: "MK Jewels - Recording",
+              artist: authenticatedSalesperson?.name || "Sales floor recorder",
+              album: selectedStore?.name || "MK Jewels"
+            });
+          }
+          navigator.mediaSession.playbackState = "playing";
+          navigator.mediaSession.setActionHandler("play", () => {
+            if (isActiveRecordingSession() && !keepAliveAudioStarted) {
+              startRecordingKeepAlive().catch((error) => {
+                console.log("Media Session play resume failed:", error);
+              });
+            } else {
+              navigator.mediaSession.playbackState = "playing";
+            }
+          });
+          navigator.mediaSession.setActionHandler("pause", () => {
+            navigator.mediaSession.playbackState = isActiveRecordingSession() ? "playing" : "paused";
+          });
+          return;
+        }
+
+        navigator.mediaSession.playbackState = "none";
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.setActionHandler("play", null);
+        navigator.mediaSession.setActionHandler("pause", null);
+      } catch (error) {
+        console.log("Media Session update failed:", error);
+      }
     }
 
     backToStoresButton.addEventListener("click", () => {
@@ -1444,6 +1573,7 @@
       message.textContent = "Requesting microphone permission...";
 
       try {
+        await startRecordingKeepAlive();
         mediaStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
@@ -1825,6 +1955,8 @@
         mediaStream.getTracks().forEach((track) => track.stop());
         mediaStream = null;
       }
+
+      stopRecordingKeepAlive();
 
       if (websocket && websocket.readyState === WebSocket.OPEN) {
         websocket.close();
