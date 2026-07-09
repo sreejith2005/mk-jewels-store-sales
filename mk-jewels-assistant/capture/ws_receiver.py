@@ -179,6 +179,41 @@ class _DirectAudioSession(Session):
                 event_id=event_id,
             )
 
+    def log_recorder_event(self, event_type: str, detail: str, metadata: dict | None = None):
+        safe_type = re.sub(r"[^a-zA-Z0-9_:-]", "_", str(event_type or "recorder_event"))[:80]
+        safe_detail = str(detail or "Recorder lifecycle event.")[:500]
+        metadata = metadata if isinstance(metadata, dict) else {}
+        event = {
+            "transcript": safe_detail,
+            "raw_transcript": safe_detail,
+            "display_transcript": safe_detail,
+            "triage_status": f"recorder:{safe_type}",
+            "objection_detected": False,
+            "price_concern": False,
+            "certification_question": False,
+            "upsell_miss": False,
+            "knowledge_gap": False,
+            "intent_signal": False,
+            "alert_priority": "none",
+            "reasoning": json.dumps(
+                {
+                    "event_type": safe_type,
+                    "metadata": metadata,
+                },
+                ensure_ascii=True,
+                default=str,
+            )[:1000],
+        }
+        self.db.log_event(self.session_id, self.salesperson_name, event)
+        logger.info(
+            "Recorder event for session=%s salesperson=%s type=%s detail=%s metadata=%s",
+            self.session_id,
+            self.salesperson_name,
+            safe_type,
+            safe_detail,
+            metadata,
+        )
+
     def _deduplicate_event_transcripts(self, event: dict):
         for field in ("raw_transcript", "display_transcript", "transcript"):
             current = str(event.get(field) or "")
@@ -280,6 +315,14 @@ class WebSocketAudioServer:
             payload = json.loads(message)
         except json.JSONDecodeError:
             logger.warning("Ignoring non-JSON recorder text message for %s.", session.salesperson_name)
+            return
+
+        if payload.get("type") == "recorder_event":
+            event_type = str(payload.get("event_type") or "recorder_event")
+            detail = str(payload.get("detail") or "Recorder lifecycle event.")
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            metadata["client_timestamp"] = payload.get("timestamp")
+            session.log_recorder_event(event_type, detail, metadata)
             return
 
         if payload.get("type") != "capture_settings":

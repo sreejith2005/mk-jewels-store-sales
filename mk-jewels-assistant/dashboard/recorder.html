@@ -598,6 +598,29 @@
       text-align: center;
     }
 
+    .interruption-banner {
+      display: grid;
+      gap: 8px;
+      padding: 14px 16px;
+      border: 1px solid rgba(192, 57, 43, 0.36);
+      border-radius: 12px;
+      background: #fff5f3;
+      color: var(--danger);
+      font-size: 15px;
+      font-weight: 800;
+      text-align: center;
+      box-shadow: 0 14px 34px rgba(192, 57, 43, 0.14);
+    }
+
+    .interruption-banner button {
+      min-height: 44px;
+      border-color: rgba(192, 57, 43, 0.32);
+      color: var(--danger);
+      font-size: 14px;
+      font-weight: 800;
+      background: #fff;
+    }
+
     @keyframes recordPulse {
       0%,
       100% {
@@ -776,6 +799,10 @@
         </div>
 
         <p id="readinessMessage" class="readiness-message hidden" role="status" aria-live="polite"></p>
+        <div id="interruptionBanner" class="interruption-banner hidden" role="alert">
+          <span>Recording interrupted — tap to resume</span>
+          <button id="resumeRecordingButton" type="button">Resume recording</button>
+        </div>
 
         <div class="status-grid" aria-live="polite">
           <div class="status-row">
@@ -834,6 +861,8 @@
     const wakeLockStatus = document.getElementById("wakeLockStatus");
     const message = document.getElementById("message");
     const readinessMessage = document.getElementById("readinessMessage");
+    const interruptionBanner = document.getElementById("interruptionBanner");
+    const resumeRecordingButton = document.getElementById("resumeRecordingButton");
 
     let wakeLock = null;
     let selectedStore = null;
@@ -845,10 +874,14 @@
     let audioContext = null;
     let mediaStream = null;
     let sourceNode = null;
-    let processorNode = null;
+    let workletNode = null;
+    let silentOutputNode = null;
     let websocket = null;
     let recordingStartedAt = 0;
     let counterTimer = null;
+    let trackMuteCheckTimer = null;
+    let activeAudioTrack = null;
+    let interruptionState = null;
     let isRecording = false;
     let isSystemReady = true;
     let readinessPollTimer = null;
@@ -856,47 +889,31 @@
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
 
-    wakeLockStatus.textContent = "wakeLock" in navigator ? "" : "Screen lock: unavailable";
+    wakeLockStatus.textContent = "";
 
     function handleVisibilityChange() {
-      if (document.visibilityState === "visible" && wakeLock === null) {
-        acquireWakeLock();
+      if (document.visibilityState === "hidden" && audioContext?.state === "suspended") {
+        console.log("AudioContext suspended while hidden; attempting resume.");
+        logRecorderEvent("audio_context_resume_attempt", "AudioContext suspended while hidden; attempting resume.", {
+          state: audioContext.state
+        });
+        audioContext.resume().catch((error) => {
+          console.log("AudioContext resume while hidden failed:", error);
+          logRecorderEvent("audio_context_resume_failed", "AudioContext resume while hidden failed.", {
+            error: error.message
+          });
+        });
       }
     }
 
     async function acquireWakeLock() {
-      if (!("wakeLock" in navigator)) {
-        wakeLockStatus.textContent = "Screen lock: unavailable";
-        return;
-      }
-
-      try {
-        wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => {
-          wakeLock = null;
-        });
-        wakeLockStatus.textContent = "Screen will stay on";
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-      } catch (error) {
-        wakeLock = null;
-        wakeLockStatus.textContent = "Screen lock: unavailable";
-        console.log("Wake Lock unavailable:", error);
-      }
+      document.addEventListener("visibilitychange", handleVisibilityChange);
     }
 
     async function releaseWakeLock() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-
-      if (wakeLock !== null) {
-        try {
-          await wakeLock.release();
-        } catch (error) {
-          console.log("Wake Lock release failed:", error);
-        } finally {
-          wakeLock = null;
-        }
-      }
-      wakeLockStatus.textContent = "wakeLock" in navigator ? "" : "Screen lock: unavailable";
+      wakeLock = null;
+      wakeLockStatus.textContent = "";
     }
 
     backToStoresButton.addEventListener("click", () => {
@@ -926,6 +943,7 @@
 
       startRecording();
     });
+    resumeRecordingButton.addEventListener("click", resumeInterruptedRecording);
     signOutButton.addEventListener("click", signOutSalesperson);
     window.addEventListener("beforeunload", stopRecording);
 
@@ -1430,6 +1448,7 @@
             autoGainControl: true
           }
         });
+        bindAudioTrackInterruptionHandlers();
 
         connectWebSocket();
       } catch (error) {
@@ -1448,7 +1467,13 @@
         if (isRecording) {
           message.textContent = "";
         } else {
-          startAudioPipeline();
+          startAudioPipeline().catch((error) => {
+            message.textContent = `Unable to start audio capture: ${error.message}`;
+            logRecorderEvent("audio_pipeline_start_failed", "Audio pipeline failed to start.", {
+              error: error.message
+            });
+            cleanup();
+          });
         }
       });
 
@@ -1489,27 +1514,37 @@
       }, delaySeconds * 1000);
     }
 
-    function startAudioPipeline() {
+    async function startAudioPipeline() {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: TARGET_SAMPLE_RATE
       });
 
+      await installPcmWorklet(audioContext);
       sourceNode = audioContext.createMediaStreamSource(mediaStream);
-      processorNode = audioContext.createScriptProcessor(4096, 1, 1);
-      sendCaptureSettings();
-
-      processorNode.onaudioprocess = (event) => {
+      workletNode = new AudioWorkletNode(audioContext, "pcm-capture-processor", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+        processorOptions: {
+          targetSampleRate: TARGET_SAMPLE_RATE
+        }
+      });
+      workletNode.port.onmessage = (event) => {
         if (!isRecording || !websocket || websocket.readyState !== WebSocket.OPEN) {
           return;
         }
 
-        const input = event.inputBuffer.getChannelData(0);
-        const pcm = floatToInt16Pcm(input, audioContext.sampleRate, TARGET_SAMPLE_RATE);
-        websocket.send(pcm.buffer);
+        if (event.data?.type === "pcm" && event.data.buffer) {
+          websocket.send(event.data.buffer);
+        }
       };
+      silentOutputNode = audioContext.createGain();
+      silentOutputNode.gain.value = 0;
+      sendCaptureSettings();
 
-      sourceNode.connect(processorNode);
-      processorNode.connect(audioContext.destination);
+      sourceNode.connect(workletNode);
+      workletNode.connect(silentOutputNode);
+      silentOutputNode.connect(audioContext.destination);
 
       isRecording = true;
       recordingStartedAt = Date.now();
@@ -1518,6 +1553,76 @@
       message.textContent = "";
       updateRecordingCounter();
       counterTimer = window.setInterval(updateRecordingCounter, 1000);
+    }
+
+    async function installPcmWorklet(context) {
+      const workletSource = `
+        class PcmCaptureProcessor extends AudioWorkletProcessor {
+          constructor(options) {
+            super();
+            this.targetSampleRate = options.processorOptions.targetSampleRate;
+          }
+
+          process(inputs, outputs) {
+            const channel = inputs[0]?.[0];
+            if (!channel || channel.length === 0) {
+              return true;
+            }
+
+            const outputChannel = outputs[0]?.[0];
+            if (outputChannel) {
+              outputChannel.fill(0);
+            }
+
+            const samples = this.downsample(channel, sampleRate, this.targetSampleRate);
+            const pcm = new Int16Array(samples.length);
+            for (let index = 0; index < samples.length; index += 1) {
+              const sample = Math.max(-1, Math.min(1, samples[index]));
+              pcm[index] = sample < 0 ? sample * 32768 : sample * 32767;
+            }
+            this.port.postMessage({ type: "pcm", buffer: pcm.buffer }, [pcm.buffer]);
+            return true;
+          }
+
+          downsample(buffer, inputSampleRate, outputSampleRate) {
+            if (outputSampleRate >= inputSampleRate) {
+              return buffer;
+            }
+
+            const ratio = inputSampleRate / outputSampleRate;
+            const newLength = Math.round(buffer.length / ratio);
+            const result = new Float32Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+
+            while (offsetResult < result.length) {
+              const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+              let accumulator = 0;
+              let count = 0;
+
+              for (let index = offsetBuffer; index < nextOffsetBuffer && index < buffer.length; index += 1) {
+                accumulator += buffer[index];
+                count += 1;
+              }
+
+              result[offsetResult] = count > 0 ? accumulator / count : 0;
+              offsetResult += 1;
+              offsetBuffer = nextOffsetBuffer;
+            }
+
+            return result;
+          }
+        }
+
+        registerProcessor("pcm-capture-processor", PcmCaptureProcessor);
+      `;
+      const blob = new Blob([workletSource], { type: "application/javascript" });
+      const workletUrl = URL.createObjectURL(blob);
+      try {
+        await context.audioWorklet.addModule(workletUrl);
+      } finally {
+        URL.revokeObjectURL(workletUrl);
+      }
     }
 
     function sendCaptureSettings() {
@@ -1529,7 +1634,132 @@
       websocket.send(JSON.stringify({
         type: "capture_settings",
         audioContextSampleRate: audioContext.sampleRate,
+        captureProcessor: "AudioWorkletNode",
         trackSettings: audioTrack?.getSettings?.() || null
+      }));
+    }
+
+    function bindAudioTrackInterruptionHandlers() {
+      activeAudioTrack = mediaStream?.getAudioTracks?.()[0] || null;
+      if (!activeAudioTrack) {
+        return;
+      }
+
+      activeAudioTrack.addEventListener("mute", handleAudioTrackMuted);
+      activeAudioTrack.addEventListener("unmute", handleAudioTrackUnmuted);
+      activeAudioTrack.addEventListener("ended", handleAudioTrackEnded);
+    }
+
+    function unbindAudioTrackInterruptionHandlers() {
+      if (!activeAudioTrack) {
+        return;
+      }
+
+      activeAudioTrack.removeEventListener("mute", handleAudioTrackMuted);
+      activeAudioTrack.removeEventListener("unmute", handleAudioTrackUnmuted);
+      activeAudioTrack.removeEventListener("ended", handleAudioTrackEnded);
+      activeAudioTrack = null;
+    }
+
+    function handleAudioTrackMuted() {
+      showInterruption("mute", true);
+      startTrackMuteRecoveryCheck();
+    }
+
+    function handleAudioTrackUnmuted() {
+      clearInterruption("unmute");
+    }
+
+    function handleAudioTrackEnded() {
+      showInterruption("ended", false);
+      isRecording = false;
+      updateRecordButtonState();
+      recordingStatus.textContent = "Interrupted";
+      recordingStatus.className = "disconnected";
+      clearTrackMuteRecoveryCheck();
+    }
+
+    function showInterruption(reason, recoverable) {
+      const occurredAt = new Date().toISOString();
+      interruptionState = { reason, recoverable, occurredAt };
+      interruptionBanner.classList.remove("hidden");
+      message.textContent = "Recording interrupted. Tap Resume recording to continue.";
+      logRecorderEvent(`audio_track_${reason}`, `Recording interrupted: audio track ${reason}.`, {
+        occurredAt,
+        recoverable
+      });
+    }
+
+    function clearInterruption(reason) {
+      if (!interruptionState) {
+        return;
+      }
+
+      const resolvedAt = new Date().toISOString();
+      const interruptedForMs = Date.parse(resolvedAt) - Date.parse(interruptionState.occurredAt);
+      interruptionBanner.classList.add("hidden");
+      message.textContent = "";
+      logRecorderEvent("audio_track_resumed", `Recording resumed after ${interruptionState.reason}.`, {
+        interruptedForMs,
+        reason
+      });
+      interruptionState = null;
+      clearTrackMuteRecoveryCheck();
+      if (audioContext?.state === "suspended") {
+        audioContext.resume().catch((error) => console.log("AudioContext resume failed:", error));
+      }
+      if (websocket?.readyState === WebSocket.OPEN) {
+        isRecording = true;
+        updateRecordButtonState();
+      }
+    }
+
+    function startTrackMuteRecoveryCheck() {
+      clearTrackMuteRecoveryCheck();
+      trackMuteCheckTimer = window.setInterval(() => {
+        if (!activeAudioTrack || activeAudioTrack.readyState === "ended") {
+          return;
+        }
+        if (!activeAudioTrack.muted) {
+          clearInterruption("auto_unmute");
+        }
+      }, 2000);
+    }
+
+    function clearTrackMuteRecoveryCheck() {
+      if (trackMuteCheckTimer) {
+        window.clearInterval(trackMuteCheckTimer);
+        trackMuteCheckTimer = null;
+      }
+    }
+
+    async function resumeInterruptedRecording() {
+      if (!interruptionState) {
+        return;
+      }
+
+      if (interruptionState.recoverable && activeAudioTrack && activeAudioTrack.readyState !== "ended") {
+        clearInterruption("manual_resume");
+        return;
+      }
+
+      logRecorderEvent("audio_track_manual_restart", "User tapped resume after audio track ended.");
+      cleanup({ keepMessage: true });
+      await startRecording();
+    }
+
+    function logRecorderEvent(eventType, detail, metadata = {}) {
+      console.log("Recorder event:", eventType, detail, metadata);
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      websocket.send(JSON.stringify({
+        type: "recorder_event",
+        event_type: eventType,
+        detail,
+        timestamp: new Date().toISOString(),
+        metadata
       }));
     }
 
@@ -1540,7 +1770,7 @@
       cleanup();
     }
 
-    function cleanup() {
+    function cleanup(options = {}) {
       isRecording = false;
 
       if (counterTimer) {
@@ -1548,10 +1778,20 @@
         counterTimer = null;
       }
 
-      if (processorNode) {
-        processorNode.disconnect();
-        processorNode.onaudioprocess = null;
-        processorNode = null;
+      clearTrackMuteRecoveryCheck();
+      interruptionState = null;
+      interruptionBanner.classList.add("hidden");
+      unbindAudioTrackInterruptionHandlers();
+
+      if (workletNode) {
+        workletNode.port.onmessage = null;
+        workletNode.disconnect();
+        workletNode = null;
+      }
+
+      if (silentOutputNode) {
+        silentOutputNode.disconnect();
+        silentOutputNode = null;
       }
 
       if (sourceNode) {
@@ -1580,6 +1820,9 @@
       recordingStatus.className = "";
       setConnectionStatus(false);
       releaseWakeLock();
+      if (!options.keepMessage && !userInitiatedStop) {
+        message.textContent = "";
+      }
     }
 
     function updateRecordingCounter() {
