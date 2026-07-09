@@ -612,6 +612,10 @@
       box-shadow: 0 14px 34px rgba(192, 57, 43, 0.14);
     }
 
+    .interruption-banner.hidden {
+      display: none;
+    }
+
     .interruption-banner button {
       min-height: 44px;
       border-color: rgba(192, 57, 43, 0.32);
@@ -1680,9 +1684,13 @@
     }
 
     function showInterruption(reason, recoverable) {
+      if (!isActiveRecordingSession()) {
+        return;
+      }
+
       const occurredAt = new Date().toISOString();
       interruptionState = { reason, recoverable, occurredAt };
-      interruptionBanner.classList.remove("hidden");
+      updateInterruptionBannerVisibility();
       message.textContent = "Recording interrupted. Tap Resume recording to continue.";
       logRecorderEvent(`audio_track_${reason}`, `Recording interrupted: audio track ${reason}.`, {
         occurredAt,
@@ -1697,13 +1705,13 @@
 
       const resolvedAt = new Date().toISOString();
       const interruptedForMs = Date.parse(resolvedAt) - Date.parse(interruptionState.occurredAt);
-      interruptionBanner.classList.add("hidden");
-      message.textContent = "";
       logRecorderEvent("audio_track_resumed", `Recording resumed after ${interruptionState.reason}.`, {
         interruptedForMs,
         reason
       });
       interruptionState = null;
+      updateInterruptionBannerVisibility();
+      message.textContent = "";
       clearTrackMuteRecoveryCheck();
       if (audioContext?.state === "suspended") {
         audioContext.resume().catch((error) => console.log("AudioContext resume failed:", error));
@@ -1712,6 +1720,14 @@
         isRecording = true;
         updateRecordButtonState();
       }
+    }
+
+    function isActiveRecordingSession() {
+      return recordingStartedAt > 0 && Boolean(mediaStream && activeAudioTrack);
+    }
+
+    function updateInterruptionBannerVisibility() {
+      interruptionBanner.classList.toggle("hidden", !(interruptionState && isActiveRecordingSession()));
     }
 
     function startTrackMuteRecoveryCheck() {
@@ -1780,7 +1796,8 @@
 
       clearTrackMuteRecoveryCheck();
       interruptionState = null;
-      interruptionBanner.classList.add("hidden");
+      recordingStartedAt = 0;
+      updateInterruptionBannerVisibility();
       unbindAudioTrackInterruptionHandlers();
 
       if (workletNode) {
