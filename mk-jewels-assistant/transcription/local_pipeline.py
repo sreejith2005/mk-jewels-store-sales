@@ -247,11 +247,24 @@ def transcribe_and_triage(
         try:
             raw_transcript = indic_conformer_stt.transcribe(audio_bytes, sample_rate)
         except STTError as error:
-            logger.error("STT failed for %s: %s", salesperson_name, error)
+            logger.error(
+                "STT failed for %s. sample_rate=%s, audio_bytes=%s: %s",
+                salesperson_name,
+                sample_rate,
+                len(audio_bytes),
+                error,
+                exc_info=True,
+            )
             return _empty_event("", "STT failed")
 
         if not raw_transcript:
-            logger.warning("Empty transcript from STT, skipping triage")
+            logger.warning(
+                "Empty transcript from STT, skipping triage. "
+                "salesperson=%s, sample_rate=%s, audio_bytes=%s",
+                salesperson_name,
+                sample_rate,
+                len(audio_bytes),
+            )
             return _empty_event("", "STT failed")
 
         transcript = raw_transcript
