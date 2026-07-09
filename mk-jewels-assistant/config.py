@@ -31,6 +31,7 @@ class Config:
     PIPELINE_MODE = _get_pipeline_mode()
     DASHBOARD_AUTH_PASS = os.getenv("DASHBOARD_AUTH_PASS", "5500")
     CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "8"))
+    OVERLAP_SECONDS = float(os.getenv("OVERLAP_SECONDS", "0.75"))
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
     INDIC_CONFORMER_LANGUAGE = os.getenv("INDIC_CONFORMER_LANGUAGE", "hi")

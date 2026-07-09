@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import threading
+import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -27,6 +28,31 @@ from transcription.gemini_stt import GeminiAPIError
 logger = get_logger(__name__)
 
 
+def _tokenize_transcript(text: str) -> list[str]:
+    return re.findall(r"\S+", str(text or "").strip())
+
+
+def strip_transcript_overlap(previous_text: str, current_text: str, max_words: int = 12) -> str:
+    previous_words = _tokenize_transcript(previous_text)
+    current_words = _tokenize_transcript(current_text)
+    if not previous_words or not current_words:
+        return str(current_text or "").strip()
+
+    max_overlap = min(len(previous_words), len(current_words), max_words)
+    previous_lower = [word.casefold() for word in previous_words]
+    current_lower = [word.casefold() for word in current_words]
+
+    for size in range(max_overlap, 0, -1):
+        if previous_lower[-size:] == current_lower[:size]:
+            return " ".join(current_words[size:])
+
+    return " ".join(current_words)
+
+
+def prepend_audio_overlap(previous_tail: bytes, chunk_body: bytes) -> bytes:
+    return bytes(previous_tail) + bytes(chunk_body)
+
+
 class _DirectAudioSession(Session):
     def __init__(
         self,
@@ -49,6 +75,15 @@ class _DirectAudioSession(Session):
         self._stop_event = threading.Event()
         self._thread = None
         self._pending = set()
+        self._future_sequences = {}
+        self._completed_events = {}
+        self._next_sequence = 0
+        self._next_event_sequence = 0
+        self._last_transcripts = {
+            "transcript": "",
+            "raw_transcript": "",
+            "display_transcript": "",
+        }
         self._executor = ThreadPoolExecutor(max_workers=3)
         self._closed = False
 
@@ -83,6 +118,8 @@ class _DirectAudioSession(Session):
             salesperson_name=self.salesperson_name,
         )
         self._pending.add(future)
+        self._future_sequences[future] = self._next_sequence
+        self._next_sequence += 1
 
     def has_backpressure(self) -> bool:
         self._collect_completed(self._pending)
@@ -100,17 +137,36 @@ class _DirectAudioSession(Session):
             completed = as_completed(list(pending), timeout=timeout)
             for future in completed:
                 pending.remove(future)
-                self._handle_future(future)
+                self._collect_future_result(future)
         except TimeoutError:
             return
 
-    def _handle_future(self, future):
+        self._drain_completed_events()
+
+    def _collect_future_result(self, future):
+        sequence = self._future_sequences.pop(future, None)
+        if sequence is None:
+            return
+
         try:
             event = future.result()
         except (GeminiAPIError, PipelineError) as error:
             logger.error("Pipeline error for %s: %s", self.salesperson_name, error)
+            self._completed_events[sequence] = None
             return
 
+        self._completed_events[sequence] = event
+
+    def _drain_completed_events(self):
+        while self._next_event_sequence in self._completed_events:
+            event = self._completed_events.pop(self._next_event_sequence)
+            self._next_event_sequence += 1
+            if event is None:
+                continue
+            self._handle_event(event)
+
+    def _handle_event(self, event):
+        self._deduplicate_event_transcripts(event)
         self.events.append(event)
         self.transcript_log.append(event.get("transcript", ""))
         event_id = self.db.log_event(self.session_id, self.salesperson_name, event)
@@ -122,6 +178,16 @@ class _DirectAudioSession(Session):
                 store_name=self.store_name,
                 event_id=event_id,
             )
+
+    def _deduplicate_event_transcripts(self, event: dict):
+        for field in ("raw_transcript", "display_transcript", "transcript"):
+            current = str(event.get(field) or "")
+            if not current:
+                continue
+
+            cleaned = strip_transcript_overlap(self._last_transcripts.get(field, ""), current)
+            event[field] = cleaned
+            self._last_transcripts[field] = cleaned or current
 
     def _queue_score_generation(self):
         threading.Thread(
@@ -145,6 +211,7 @@ class WebSocketAudioServer:
         self.host = host
         self.port = port
         self.chunk_size_bytes = Config.SAMPLE_RATE * 2 * Config.CHUNK_DURATION_SECONDS
+        self.overlap_size_bytes = int(Config.SAMPLE_RATE * 2 * Config.OVERLAP_SECONDS)
 
     async def start(self):
         async with serve(self._handle_connection, self.host, self.port):
@@ -181,12 +248,13 @@ class WebSocketAudioServer:
         )
         session.start()
         buffer = bytearray()
+        previous_tail = b""
 
         try:
             async for message in websocket:
                 if isinstance(message, str):
-                    await websocket.close(code=1003, reason="Expected raw PCM audio bytes")
-                    break
+                    self._handle_text_message(message, session)
+                    continue
 
                 buffer.extend(message)
 
@@ -194,7 +262,9 @@ class WebSocketAudioServer:
                     while session.has_backpressure():
                         await asyncio.sleep(0.1)
 
-                    chunk = bytes(buffer[: self.chunk_size_bytes])
+                    chunk_body = bytes(buffer[: self.chunk_size_bytes])
+                    chunk = prepend_audio_overlap(previous_tail, chunk_body)
+                    previous_tail = chunk_body[-self.overlap_size_bytes :] if self.overlap_size_bytes > 0 else b""
                     del buffer[: self.chunk_size_bytes]
                     session.submit_audio_chunk(chunk)
 
@@ -204,6 +274,24 @@ class WebSocketAudioServer:
             while session.has_pending():
                 await asyncio.sleep(0.1)
             session.stop()
+
+    def _handle_text_message(self, message: str, session: _DirectAudioSession):
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:
+            logger.warning("Ignoring non-JSON recorder text message for %s.", session.salesperson_name)
+            return
+
+        if payload.get("type") != "capture_settings":
+            logger.warning("Ignoring unknown recorder message type: %s", payload.get("type"))
+            return
+
+        logger.info(
+            "Recorder capture settings for %s: audioContext.sampleRate=%s, trackSettings=%s",
+            session.salesperson_name,
+            payload.get("audioContextSampleRate"),
+            payload.get("trackSettings"),
+        )
 
     def _session_context_from_path(self, path: str) -> tuple[Optional[str], int | None, str]:
         query = parse_qs(urlparse(path).query)

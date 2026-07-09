@@ -56,7 +56,7 @@ Design system:
 - Both pipelines expose identical function signature: transcribe_and_triage()
 - No raw audio stored — transcripts only (DPDP compliance)
 - SQLite for local dev, Postgres/Supabase for production (same db.py interface)
-- Chunk duration: 3 seconds (CHUNK_DURATION_SECONDS=3 in .env)
+- Chunk duration: 8 seconds by default (CHUNK_DURATION_SECONDS=8 in .env)
 - WebSocket port 8765, Flask port 5000, Next.js port 3000
 - Production server: AWS EC2 g4dn.xlarge On-Demand, ap-south-1
 - Production service: mkjewels-backend.service
