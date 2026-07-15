@@ -41,6 +41,14 @@ function getAuthStorageKey(salespersonId) {
   return `mkj_auth_${salespersonId}`;
 }
 
+function describeWebSocketError(error) {
+  try {
+    return JSON.stringify(error, Object.getOwnPropertyNames(error));
+  } catch {
+    return String(error);
+  }
+}
+
 export default function App() {
   const recorder = useAudioRecorder();
   const socketRef = useRef(null);
@@ -66,6 +74,7 @@ export default function App() {
   const [isSystemReady, setIsSystemReady] = useState(false);
   const [readinessMessage, setReadinessMessage] = useState('Connecting to server...');
   const [statusMessage, setStatusMessage] = useState('');
+  const [debugMessages, setDebugMessages] = useState([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [interruptionState, setInterruptionState] = useState(null);
   const [loadingStores, setLoadingStores] = useState(true);
@@ -83,6 +92,22 @@ export default function App() {
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     return data;
+  }, []);
+
+  const logDebug = useCallback((level, message, details = null) => {
+    const timestamp = new Date().toISOString();
+    const detailText = details === null ? '' : ` ${typeof details === 'string' ? details : JSON.stringify(details)}`;
+    const line = `[${timestamp}] ${message}${detailText}`;
+
+    if (level === 'warn') {
+      console.warn(line);
+    } else {
+      console.log(line);
+    }
+
+    if (__DEV__) {
+      setDebugMessages((current) => [line, ...current].slice(0, 8));
+    }
   }, []);
 
   useEffect(() => {
@@ -363,7 +388,10 @@ export default function App() {
     const websocket = socketRef.current;
     socketRef.current = null;
     setIsConnected(false);
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
+    if (
+      websocket
+      && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)
+    ) {
       websocket.close();
     }
   }, []);
@@ -409,44 +437,63 @@ export default function App() {
       return;
     }
 
-    const websocket = new WebSocket(buildWebSocketUrl({
+    const websocketUrl = buildWebSocketUrl({
       salesperson: authenticatedSalesperson,
       store: selectedStore,
-    }));
+    });
+    const captureSettingsMessage = {
+      type: 'capture_settings',
+      audioContextSampleRate: TARGET_SAMPLE_RATE,
+      captureProcessor: '@siteed/audio-studio',
+      trackSettings: {
+        sampleRate: TARGET_SAMPLE_RATE,
+        channelCount: 1,
+        bitDepth: 16,
+        platform: Platform.OS,
+      },
+    };
+    const firstMessageJson = JSON.stringify(captureSettingsMessage);
+
+    logDebug('log', 'WebSocket connecting', {
+      url: websocketUrl,
+      salesperson_id: authenticatedSalesperson.id,
+      store_id: selectedStore.id,
+    });
+
+    const websocket = new WebSocket(websocketUrl);
     socketRef.current = websocket;
 
     websocket.onopen = () => {
+      logDebug('log', 'WebSocket onopen fired');
       reconnectAttemptsRef.current = 0;
       setIsConnected(true);
       setStatusMessage('');
-      websocket.send(JSON.stringify({
-        type: 'capture_settings',
-        audioContextSampleRate: TARGET_SAMPLE_RATE,
-        captureProcessor: '@siteed/audio-studio',
-        trackSettings: {
-          sampleRate: TARGET_SAMPLE_RATE,
-          channelCount: 1,
-          bitDepth: 16,
-          platform: Platform.OS,
-        },
-      }));
+      logDebug('log', 'WebSocket first message', firstMessageJson);
+      websocket.send(firstMessageJson);
     };
 
-    websocket.onclose = () => {
+    websocket.onclose = (event) => {
+      const code = event?.code ?? 'unknown';
+      const reason = event?.reason || '';
+      logDebug('warn', 'WebSocket onclose', { code, reason });
       setIsConnected(false);
       socketRef.current = null;
+      if (reason) {
+        setStatusMessage(`Connection closed (${code}): ${reason}`);
+      }
       if (streamActiveRef.current && !userInitiatedStopRef.current) {
         scheduleReconnect();
       }
     };
 
-    websocket.onerror = () => {
+    websocket.onerror = (error) => {
+      logDebug('warn', 'WebSocket onerror', describeWebSocketError(error));
       setIsConnected(false);
       if (!streamActiveRef.current) {
         setStatusMessage('WebSocket error. Check the recorder backend.');
       }
     };
-  }, [authenticatedSalesperson, scheduleReconnect, selectedStore]);
+  }, [authenticatedSalesperson, logDebug, scheduleReconnect, selectedStore]);
 
   const startRecording = useCallback(async () => {
     if (!isSystemReady) {
@@ -463,7 +510,6 @@ export default function App() {
     reconnectAttemptsRef.current = 0;
     setStatusMessage('Starting microphone...');
     setInterruptionState(null);
-    connectWebSocket();
 
     try {
       await recorder.startRecording({
@@ -515,8 +561,10 @@ export default function App() {
         },
       });
       recordingStartedAtRef.current = Date.now();
-      setStatusMessage('');
+      setStatusMessage('Connecting...');
+      connectWebSocket();
     } catch (error) {
+      logDebug('warn', 'Recorder start failed before WebSocket connect', error?.message || String(error));
       streamActiveRef.current = false;
       closeSocket();
       setStatusMessage(`Unable to start recording: ${error.message}`);
@@ -528,6 +576,7 @@ export default function App() {
     closeSocket,
     connectWebSocket,
     isSystemReady,
+    logDebug,
     recorder,
     selectedStore,
     showInterruption,
@@ -762,6 +811,15 @@ export default function App() {
         </View>
 
         {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
+
+        {__DEV__ && debugMessages.length > 0 ? (
+          <View style={styles.debugPanel}>
+            <Text style={styles.debugTitle}>WebSocket debug</Text>
+            {debugMessages.map((entry) => (
+              <Text key={entry} style={styles.debugText}>{entry}</Text>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
     );
   }
@@ -1059,5 +1117,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
+  },
+  debugPanel: {
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(160, 120, 64, 0.18)',
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+  },
+  debugTitle: {
+    color: '#1A1614',
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  debugText: {
+    color: '#6B6560',
+    fontSize: 11,
+    lineHeight: 15,
   },
 });
