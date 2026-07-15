@@ -21,6 +21,7 @@ const BACKEND_ORIGIN = 'https://store.mkjewels.net';
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const AUTH_TTL_MS = 12 * 60 * 60 * 1000;
+const SHOW_DEBUG_PANEL = __DEV__;
 
 function buildWebSocketUrl({ salesperson, store }) {
   const wsOrigin = BACKEND_ORIGIN.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
@@ -105,9 +106,7 @@ export default function App() {
       console.log(line);
     }
 
-    if (__DEV__) {
-      setDebugMessages((current) => [line, ...current].slice(0, 8));
-    }
+    setDebugMessages((current) => [line, ...current].slice(0, 8));
   }, []);
 
   useEffect(() => {
@@ -840,7 +839,7 @@ export default function App() {
 
         {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
 
-        {__DEV__ && debugMessages.length > 0 ? (
+        {SHOW_DEBUG_PANEL && debugMessages.length > 0 ? (
           <View style={styles.debugPanel}>
             <Text style={styles.debugTitle}>WebSocket debug</Text>
             {debugMessages.map((entry) => (
