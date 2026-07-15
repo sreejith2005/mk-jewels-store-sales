@@ -384,8 +384,16 @@ export default function App() {
     });
   }, [hasActiveRecordingSession, sendRecorderEvent]);
 
-  const closeSocket = useCallback(() => {
+  const closeSocket = useCallback((reason, metadata = {}) => {
     const websocket = socketRef.current;
+    const readyState = websocket?.readyState ?? 'none';
+    logDebug('warn', `WebSocket close called from: ${reason || 'unknown'}`, {
+      readyState,
+      streamActive: streamActiveRef.current,
+      userInitiatedStop: userInitiatedStopRef.current,
+      reconnectAttempts: reconnectAttemptsRef.current,
+      ...metadata,
+    });
     socketRef.current = null;
     setIsConnected(false);
     if (
@@ -394,7 +402,7 @@ export default function App() {
     ) {
       websocket.close();
     }
-  }, []);
+  }, [logDebug]);
 
   const stopRecording = useCallback(async (message) => {
     userInitiatedStopRef.current = true;
@@ -406,7 +414,7 @@ export default function App() {
     }
     setInterruptionState(null);
     recordingStartedAtRef.current = 0;
-    closeSocket();
+    closeSocket('stopRecording', { message: message || '' });
     if (recorder.isRecording) {
       await recorder.stopRecording();
     }
@@ -416,6 +424,9 @@ export default function App() {
   const scheduleReconnect = useCallback(() => {
     if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
       setStatusMessage(`Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Tap Start to retry.`);
+      logDebug('warn', 'stopRecording requested from: reconnect attempts exhausted', {
+        maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+      });
       stopRecording().catch((error) => setStatusMessage(`Stop failed: ${error.message}`));
       return;
     }
@@ -475,7 +486,17 @@ export default function App() {
     websocket.onclose = (event) => {
       const code = event?.code ?? 'unknown';
       const reason = event?.reason || '';
-      logDebug('warn', 'WebSocket onclose', { code, reason });
+      logDebug('warn', 'WebSocket onclose', {
+        code,
+        reason,
+        currentSocketMatches: socketRef.current === websocket,
+        streamActive: streamActiveRef.current,
+        userInitiatedStop: userInitiatedStopRef.current,
+        reconnectAttempts: reconnectAttemptsRef.current,
+      });
+      if (socketRef.current !== websocket) {
+        return;
+      }
       setIsConnected(false);
       socketRef.current = null;
       if (reason) {
@@ -541,11 +562,18 @@ export default function App() {
         bufferDurationSeconds: 0.1,
         autoResumeAfterInterruption: true,
         onRecordingInterrupted: (event) => {
+          logDebug('warn', 'Recording interruption event', event);
           if (event.isPaused) {
             showInterruption(event.reason, true);
           } else {
             clearInterruption(event.reason);
           }
+        },
+        onMaxDurationReached: (event) => {
+          logDebug('warn', 'Recorder max duration reached', event);
+        },
+        onRecordingStopped: (_recording, reason) => {
+          logDebug('warn', 'Recorder stopped callback', { reason });
         },
         onAudioStream: async (event) => {
           const websocket = socketRef.current;
@@ -566,7 +594,7 @@ export default function App() {
     } catch (error) {
       logDebug('warn', 'Recorder start failed before WebSocket connect', error?.message || String(error));
       streamActiveRef.current = false;
-      closeSocket();
+      closeSocket('startRecording catch', { error: error?.message || String(error) });
       setStatusMessage(`Unable to start recording: ${error.message}`);
       setInterruptionState(null);
     }
