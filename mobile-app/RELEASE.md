@@ -62,3 +62,23 @@ The output APK is written to:
 ```text
 mobile-app/android/app/build/outputs/apk/release/app-release.apk
 ```
+
+## Publish APK download link
+
+The production Flask backend serves the Android APK from this exact server path:
+
+```text
+/home/ubuntu/mk-jewels-store-sales/mobile-app/android/app/build/outputs/apk/release/app-release.apk
+```
+
+After each new release build, manually copy the rebuilt APK to that path on the production server before sharing the download link. From a local PowerShell terminal in the repo root, run:
+
+```powershell
+scp mobile-app\android\app\build\outputs\apk\release\app-release.apk ubuntu@store.mkjewels.net:/home/ubuntu/mk-jewels-store-sales/mobile-app/android/app/build/outputs/apk/release/app-release.apk
+```
+
+Once copied and the backend route is deployed, the direct download URL is:
+
+```text
+https://store.mkjewels.net/download/mkjewels-app.apk
+```

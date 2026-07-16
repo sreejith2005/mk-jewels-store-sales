@@ -91,6 +91,24 @@ def test_recorder_store_routes_skip_dashboard_auth(dashboard_client):
     assert salespersons_response.get_json()[0]["id"] == salesperson_id
 
 
+def test_apk_download_route_skips_dashboard_auth_and_sets_download_headers(
+    dashboard_client, tmp_path, monkeypatch
+):
+    client, _db, _db_path = dashboard_client
+    apk_path = tmp_path / "app-release.apk"
+    apk_path.write_bytes(b"fake apk")
+    monkeypatch.setattr(server, "ANDROID_RELEASE_APK", apk_path)
+
+    response = client.get("/download/mkjewels-app.apk")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/vnd.android.package-archive"
+    assert response.headers["Content-Disposition"] == (
+        "attachment; filename=mkjewels-app.apk"
+    )
+    assert response.data == b"fake apk"
+
+
 def test_protected_route_with_valid_token_returns_200(dashboard_client):
     client, _db, _db_path = dashboard_client
 

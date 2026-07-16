@@ -16,6 +16,18 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 DASHBOARD_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = APP_ROOT.parent
+ANDROID_RELEASE_APK = (
+    REPO_ROOT
+    / "mobile-app"
+    / "android"
+    / "app"
+    / "build"
+    / "outputs"
+    / "apk"
+    / "release"
+    / "app-release.apk"
+)
 
 from alerting.console_alert import AlertManager  # noqa: E402
 from config import Config  # noqa: E402
@@ -85,6 +97,7 @@ def require_auth() -> Any:
         return None
     public_paths = [
         "/recorder",
+        "/download/",
         "/static/",
         "/api/auth/manager",
         "/api/auth/",
@@ -112,6 +125,16 @@ def require_auth() -> Any:
 @app.get("/recorder")
 def get_recorder():
     return send_file(DASHBOARD_ROOT / "recorder.html")
+
+
+@app.get("/download/mkjewels-app.apk")
+def download_android_apk():
+    return send_file(
+        ANDROID_RELEASE_APK,
+        mimetype="application/vnd.android.package-archive",
+        as_attachment=True,
+        download_name="mkjewels-app.apk",
+    )
 
 
 @app.get("/api/health")
