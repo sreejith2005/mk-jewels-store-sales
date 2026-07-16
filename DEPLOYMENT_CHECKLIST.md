@@ -53,5 +53,5 @@ DEVICE=cuda
 POSTGRES_URL=<supabase session pooler url>
 GEMINI_API_KEY=<key> (needed even in production for daily reports)
 TELEGRAM_BOT_TOKEN=<token>
-TELEGRAM_CHAT_ID=<owner chat id>
+TELEGRAM_CHAT_ID=<group chat id>
 CHUNK_DURATION_SECONDS=3
