@@ -51,9 +51,9 @@ def _load_kb_json(filename: str) -> dict[str, Any]:
 OBJECTION_RULES = _load_kb_json("objection_rules.json")
 PRODUCT_FACTS = _load_kb_json("product_facts.json")
 
-SYSTEM_PROMPT = """You are a sales conversation classifier.
-Analyze the conversation and return ONLY a JSON object.
-No explanation, no markdown, no preamble. Only JSON.
+SYSTEM_PROMPT = """You are a conservative jewelry sales conversation classifier.
+Analyze only the supplied transcript and knowledge-base context. Return ONLY a JSON object:
+no explanation, markdown, or preamble.
 
 JSON format:
 {
@@ -64,49 +64,51 @@ JSON format:
   "knowledge_gap": true/false,
   "intent_signal": true/false,
   "alert_priority": "none/low/medium/high",
-  "reasoning": "max 15 words"
+  "reasoning": "max 20 words"
 }
 
 Rules:
-- price_concern: true if customer mentions price, cost, expensive, discount
-- objection_detected: true if customer shows resistance or doubt
-- intent_signal: true if customer shows buying interest
-- alert_priority high: if salesperson is rude or gives wrong facts
-- alert_priority medium: if salesperson misses obvious opportunity
-- alert_priority none: normal conversation"""
+- price_concern: false by default. Set true only when the customer clearly expresses
+  dissatisfaction with price, says they cannot proceed, threatens to leave, or the
+  price negotiation has clearly broken down. Ordinary questions about rate, making
+  charges, price, cost, discount, or best price are not price concerns.
+- objection_detected: true only for a clear customer resistance, refusal, distrust, or
+  doubt. Do not infer it from a routine question. If the fragment is short, garbled,
+  incomplete, or ambiguous, use the insufficient-signal path: objection_detected false
+  and alert_priority none.
+- intent_signal: true if the customer clearly shows buying interest.
+- alert_priority high: only for a factual claim by the salesperson that directly
+  contradicts the supplied knowledge-base content, or a clearly extreme situation in
+  which the deal is going badly. Do not use general judgment to invent a wrong fact.
+- alert_priority medium: only for a clear, specific missed opportunity supported by a
+  concrete customer signal and a clear missed salesperson response. Do not use it for
+  vague pacing, ordinary conversation drift, or a merely different sales style.
+- alert_priority none: routine conversation, uncertain evidence, and all other cases."""
 
 CRITICAL_ALERT_CALIBRATION_RULES = (
     "CRITICAL ALERT CALIBRATION RULES - read carefully before classifying:\n\n"
-    "1. Only fire HIGH alert if the salesperson said something factually wrong, "
-    "used a forbidden response, or directly contradicted a known policy. A "
-    "salesperson adapting their style or taking a different approach than the "
-    "script does NOT warrant HIGH alert.\n\n"
+    "1. HIGH is reserved for a salesperson statement that factually contradicts "
+    "the supplied MK Jewels knowledge-base content, or a clearly extreme situation "
+    "where the deal is going badly. A different style, imperfect wording, or an "
+    "unproven assumption is not a factual contradiction.\n\n"
     "2. Only fire MEDIUM alert if the salesperson clearly missed a scripted "
-    "opportunity AND the customer showed a signal that the script specifically "
-    "addresses. Do not fire MEDIUM for general conversation drift.\n\n"
+    "opportunity after a concrete customer signal that the supplied rule specifically "
+    "addresses. Require evidence that a specific response was missed; do not fire "
+    "MEDIUM for general conversation drift, pacing, or a different approach.\n\n"
     "3. If the salesperson appears to be building rapport, listening actively, "
     "or adapting to the customer - even if off-script - classify alert_priority "
     "as \"none\".\n\n"
     "4. Closing a deal in a non-scripted way is a POSITIVE outcome. Do not "
     "penalise it.\n\n"
-    "5. Be appropriately sensitive. If a customer clearly expresses a price "
-    "concern, objection, or buying intent, classify it - even if the "
-    "salesperson responds well. These signals describe the CUSTOMER's state, "
-    "not just the salesperson's failure. objection_detected and price_concern "
-    "describe what the customer said. upsell_miss and knowledge_gap describe "
-    "the salesperson's response.\n\n"
-    "6. Signals describe what happened in the conversation. If the customer "
-    "clearly expresses price concern, dissatisfaction, objection, certification "
-    "question, or buying intent, mark the relevant signal true even if the "
-    "salesperson responds well. Examples: \"Price zyada hai\" => price_concern "
-    "true; \"Making charges high hai\" => price_concern true and "
-    "objection_detected true; \"Mujhe service pasand nahi hai\" => "
-    "objection_detected true; \"Diamond certified hai kya?\" => "
-    "certification_question true; \"Mujhe bridal collection dekhna hai\" => "
-    "intent_signal true.\n\n"
-    "7. The reasoning field must state specifically what the salesperson said "
-    "vs what the script says, in max 20 words. Do not write vague reasons like "
-    "\"did not follow script\"."
+    "5. price_concern is false for ordinary rate, making-charge, price, cost, "
+    "discount, or best-price questions. Set it true only for clear dissatisfaction, "
+    "a stated inability to proceed, a walk-away signal, or a negotiation breakdown.\n\n"
+    "6. objection_detected requires a clear resistance, refusal, distrust, or doubt "
+    "signal. For a short, garbled, incomplete, or ambiguous fragment, return "
+    "objection_detected false and alert_priority none rather than guessing.\n\n"
+    "7. The reasoning field must cite the concrete transcript evidence and, for a "
+    "factual contradiction, the conflicting KB fact in max 20 words. Do not write "
+    "vague reasons like \"did not follow script\"."
 )
 
 USER_PROMPT_TEMPLATE = (
@@ -116,7 +118,8 @@ USER_PROMPT_TEMPLATE = (
     "{kb_context}\n"
     "--- END KNOWLEDGE BASE ---\n\n"
     "{calibration_rules}\n\n"
-    "Classify this jewelry sales conversation. Respond with ONLY the JSON object. "
+    "Classify this jewelry sales conversation using the supplied KB as the source of "
+    "truth for factual-contradiction decisions. Respond with ONLY the JSON object. "
     "No explanation, no preamble, no markdown code fences. Maximum response "
     "length: 150 tokens. Return exactly these fields: "
     "display_transcript (string), objection_detected (bool), price_concern (bool), certification_question (bool), "
@@ -378,7 +381,12 @@ def triage(transcript: str, salesperson_name: str) -> dict:
         logger.info("Skipping Qwen3 triage for empty transcript.")
         return _empty_event()
 
-    full_prompt = f"Classify this conversation:\n{transcript_text}"
+    full_prompt = USER_PROMPT_TEMPLATE.format(
+        salesperson_name=salesperson_name,
+        transcript=transcript_text,
+        kb_context=build_kb_context(transcript_text),
+        calibration_rules=CRITICAL_ALERT_CALIBRATION_RULES,
+    )
 
     payload = {
         "model": MODEL_NAME,
