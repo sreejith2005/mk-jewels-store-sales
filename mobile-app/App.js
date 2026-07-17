@@ -22,6 +22,8 @@ const TARGET_SAMPLE_RATE = 16000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const AUTH_TTL_MS = 12 * 60 * 60 * 1000;
 const SHOW_DEBUG_PANEL = __DEV__;
+const SESSION_END_FLUSH_TIMEOUT_MS = 1500;
+const SESSION_END_POLL_INTERVAL_MS = 50;
 
 function buildWebSocketUrl({ salesperson, store }) {
   const wsOrigin = BACKEND_ORIGIN.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
@@ -403,6 +405,48 @@ export default function App() {
     }
   }, [logDebug]);
 
+  const endSessionAndCloseSocket = useCallback(async () => {
+    const websocket = socketRef.current;
+    if (!websocket) {
+      return;
+    }
+
+    const deadline = Date.now() + SESSION_END_FLUSH_TIMEOUT_MS;
+    while (websocket.readyState === WebSocket.CONNECTING && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, SESSION_END_POLL_INTERVAL_MS));
+    }
+
+    if (websocket.readyState === WebSocket.OPEN) {
+      const sessionEndMessage = JSON.stringify({
+        type: 'session_end',
+        reason: 'user_stopped',
+      });
+      websocket.send(sessionEndMessage);
+      logDebug('log', 'WebSocket session_end sent', sessionEndMessage);
+
+      while (
+        websocket.readyState === WebSocket.OPEN
+        && websocket.bufferedAmount > 0
+        && Date.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, SESSION_END_POLL_INTERVAL_MS));
+      }
+    } else {
+      logDebug('warn', 'WebSocket session_end not sent before close', {
+        readyState: websocket.readyState,
+        timedOut: Date.now() >= deadline,
+      });
+    }
+
+    if (socketRef.current === websocket) {
+      socketRef.current = null;
+      setIsConnected(false);
+    }
+    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+      websocket.close();
+    }
+  }, [logDebug]);
+
   const stopRecording = useCallback(async (message) => {
     userInitiatedStopRef.current = true;
     streamActiveRef.current = false;
@@ -413,12 +457,12 @@ export default function App() {
     }
     setInterruptionState(null);
     recordingStartedAtRef.current = 0;
-    closeSocket('stopRecording', { message: message || '' });
+    await endSessionAndCloseSocket();
     if (recorder.isRecording) {
       await recorder.stopRecording();
     }
     setStatusMessage(message || '');
-  }, [closeSocket, recorder]);
+  }, [endSessionAndCloseSocket, recorder]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {

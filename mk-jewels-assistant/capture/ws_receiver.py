@@ -288,7 +288,13 @@ class WebSocketAudioServer:
         try:
             async for message in websocket:
                 if isinstance(message, str):
-                    self._handle_text_message(message, session)
+                    if self._handle_text_message(message, session):
+                        logger.info(
+                            "Clean session end received for session=%s salesperson=%s.",
+                            session.session_id,
+                            session.salesperson_name,
+                        )
+                        break
                     continue
 
                 buffer.extend(message)
@@ -310,12 +316,22 @@ class WebSocketAudioServer:
                 await asyncio.sleep(0.1)
             session.stop()
 
-    def _handle_text_message(self, message: str, session: _DirectAudioSession):
+    def _handle_text_message(self, message: str, session: _DirectAudioSession) -> bool:
         try:
             payload = json.loads(message)
         except json.JSONDecodeError:
             logger.warning("Ignoring non-JSON recorder text message for %s.", session.salesperson_name)
-            return
+            return False
+
+        if payload.get("type") == "session_end":
+            reason = str(payload.get("reason") or "unspecified")[:100]
+            logger.info(
+                "Session end requested for session=%s salesperson=%s reason=%s.",
+                session.session_id,
+                session.salesperson_name,
+                reason,
+            )
+            return True
 
         if payload.get("type") == "recorder_event":
             event_type = str(payload.get("event_type") or "recorder_event")
@@ -323,11 +339,11 @@ class WebSocketAudioServer:
             metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
             metadata["client_timestamp"] = payload.get("timestamp")
             session.log_recorder_event(event_type, detail, metadata)
-            return
+            return False
 
         if payload.get("type") != "capture_settings":
             logger.warning("Ignoring unknown recorder message type: %s", payload.get("type"))
-            return
+            return False
 
         logger.info(
             "Recorder capture settings for %s: audioContext.sampleRate=%s, trackSettings=%s",
@@ -335,6 +351,7 @@ class WebSocketAudioServer:
             payload.get("audioContextSampleRate"),
             payload.get("trackSettings"),
         )
+        return False
 
     def _session_context_from_path(self, path: str) -> tuple[Optional[str], int | None, str]:
         query = parse_qs(urlparse(path).query)
