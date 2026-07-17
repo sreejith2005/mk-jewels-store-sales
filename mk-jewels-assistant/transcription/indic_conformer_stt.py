@@ -1,5 +1,9 @@
+import hashlib
 import os
+import re
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 from scipy.io import wavfile
@@ -20,6 +24,7 @@ TARGET_SAMPLE_RATE = 16000
 DEFAULT_DECODING = "ctc"
 
 _model = None
+_WORD_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def _load_model() -> object:
@@ -69,6 +74,38 @@ def _resample_if_needed(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     return resample_poly(audio, up, down).astype(np.float32)
 
 
+def _repeated_word_run(transcript: str) -> tuple[str, int] | None:
+    """Return a word and run length when it appears at least six times in a row."""
+    previous_word = ""
+    run_length = 0
+    for word in _WORD_PATTERN.findall(transcript.casefold()):
+        if word == previous_word:
+            run_length += 1
+        else:
+            previous_word = word
+            run_length = 1
+        if run_length > 5:
+            return word, run_length
+    return None
+
+
+def _save_repetition_waveform(waveform: np.ndarray, fingerprint: str) -> None:
+    """Save the model input only when temporary repetition diagnostics are enabled."""
+    if not Config.DEBUG_SAVE_REPETITION_AUDIO:
+        return
+
+    try:
+        debug_dir = Path(Config.DEBUG_REPETITION_AUDIO_DIR)
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+        debug_path = debug_dir / f"repetition_{timestamp}_{fingerprint}.wav"
+        pcm = (np.clip(waveform, -1.0, 1.0) * 32767).astype(np.int16)
+        wavfile.write(debug_path, TARGET_SAMPLE_RATE, pcm)
+        logger.warning("Saved repetition diagnostic audio to %s", debug_path)
+    except Exception:
+        logger.exception("Failed to save repetition diagnostic audio")
+
+
 def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
     """
     Transcribe raw int16 PCM mono audio bytes using IndicConformer CTC decoding.
@@ -88,6 +125,10 @@ def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
             return ""
 
         waveform = torch.from_numpy(audio).float().unsqueeze(0)
+        waveform_bytes = waveform.numpy().tobytes()
+        waveform_fingerprint = hashlib.sha256(waveform_bytes).hexdigest()[:16]
+        waveform_sample_count = int(audio.size)
+        waveform_duration_seconds = waveform_sample_count / TARGET_SAMPLE_RATE
         stt_model = _load_model()
 
         with torch.no_grad():
@@ -99,7 +140,31 @@ def transcribe(audio_bytes: bytes, sample_rate: int) -> str:
 
         if isinstance(transcript, (list, tuple)):
             transcript = " ".join(str(item) for item in transcript)
-        return str(transcript).strip()
+        raw_transcript = str(transcript)
+        logger.info(
+            "IndicConformer chunk output: fingerprint=%s samples=%d duration_seconds=%.3f "
+            "raw_chars=%d raw_preview=%r",
+            waveform_fingerprint,
+            waveform_sample_count,
+            waveform_duration_seconds,
+            len(raw_transcript),
+            raw_transcript[:200],
+        )
+
+        repetition = _repeated_word_run(raw_transcript)
+        if repetition:
+            repeated_word, run_length = repetition
+            logger.warning(
+                "IndicConformer repeated-word output: word=%r run_length=%d "
+                "fingerprint=%s raw_output=%r",
+                repeated_word,
+                run_length,
+                waveform_fingerprint,
+                raw_transcript,
+            )
+            _save_repetition_waveform(audio, waveform_fingerprint)
+
+        return raw_transcript.strip()
     except STTError:
         raise
     except Exception as exc:

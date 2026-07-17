@@ -35,6 +35,13 @@ class Config:
     SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
     DEVICE = os.getenv("DEVICE", "cuda")
     INDIC_CONFORMER_LANGUAGE = os.getenv("INDIC_CONFORMER_LANGUAGE", "hi")
+    DEBUG_SAVE_REPETITION_AUDIO = (
+        os.getenv("DEBUG_SAVE_REPETITION_AUDIO", "false").lower() == "true"
+    )
+    DEBUG_REPETITION_AUDIO_DIR = os.getenv(
+        "DEBUG_REPETITION_AUDIO_DIR",
+        "/tmp/mkjewels_debug_audio",
+    )
     TRANSLATE_TO_ENGLISH = os.getenv("TRANSLATE_TO_ENGLISH", "true")
     TRANSLATE_SERVICE_URL = os.getenv(
         "TRANSLATE_SERVICE_URL",
