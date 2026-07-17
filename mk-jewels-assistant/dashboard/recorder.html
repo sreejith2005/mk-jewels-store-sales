@@ -1913,7 +1913,7 @@
       if (reason) {
         message.textContent = reason;
       }
-      cleanup();
+      cleanup({ gracefulSessionEnd: true });
     }
 
     function cleanup(options = {}) {
@@ -1958,10 +1958,23 @@
 
       stopRecordingKeepAlive();
 
-      if (websocket && websocket.readyState === WebSocket.OPEN) {
-        websocket.close();
-      }
+      const socketToClose = websocket;
       websocket = null;
+      if (socketToClose && socketToClose.readyState === WebSocket.OPEN) {
+        if (options.gracefulSessionEnd) {
+          socketToClose.send(JSON.stringify({
+            type: "session_end",
+            reason: "user_stopped"
+          }));
+          window.setTimeout(() => {
+            if (socketToClose.readyState === WebSocket.OPEN) {
+              socketToClose.close();
+            }
+          }, 100);
+        } else {
+          socketToClose.close();
+        }
+      }
 
       startButton.disabled = false;
       updateRecordButtonState();
